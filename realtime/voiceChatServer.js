@@ -68,9 +68,18 @@ class VoiceChatServer {
     this.connections = new Map();
   }
 
-  start() {
-    this.wss = new WebSocket.Server({ port: this.port, perMessageDeflate: false });
-    console.log(`[VOICE-CHAT] 🚀 Voice Chat WebSocket Server started on port ${this.port}`);
+  start(options = {}) {
+    const { server = null, path = '/realtime' } = options;
+    const wsOptions = server
+      ? { server, path, perMessageDeflate: false }
+      : { port: this.port, perMessageDeflate: false };
+
+    this.wss = new WebSocket.Server(wsOptions);
+    if (server) {
+      console.log(`[VOICE-CHAT] 🚀 Voice Chat WebSocket Server attached to HTTP server on path ${path}`);
+    } else {
+      console.log(`[VOICE-CHAT] 🚀 Voice Chat WebSocket Server started on port ${this.port}`);
+    }
     console.log(`[VOICE-CHAT] ⚡ TTS model: ${TTS_MODEL} | Silence: ${SILENCE_DURATION_MS}ms`);
 
     this.wss.on('connection', (ws, req) => {

@@ -851,9 +851,18 @@ class VoiceChatServerV2 {
     this.connections = new Map();
   }
 
-  start() {
-    this.wss = new WebSocket.Server({ port: this.port, perMessageDeflate: false });
-    console.log(`[VCv2] 🚀 Voice Chat v2 (OpenAI+Eleven) on port ${this.port}`);
+  start(options = {}) {
+    const { server = null, path = '/realtime' } = options;
+    const wsOptions = server
+      ? { server, path, perMessageDeflate: false }
+      : { port: this.port, perMessageDeflate: false };
+
+    this.wss = new WebSocket.Server(wsOptions);
+    if (server) {
+      console.log(`[VCv2] 🚀 Voice Chat v2 (OpenAI+Eleven) attached to HTTP server on path ${path}`);
+    } else {
+      console.log(`[VCv2] 🚀 Voice Chat v2 (OpenAI+Eleven) on port ${this.port}`);
+    }
 
     this.wss.on('connection', (ws, req) => {
       this._handleConnection(ws, req).catch((e) => {

@@ -247,17 +247,17 @@ server.listen(PORT, "0.0.0.0", () => {
   // Sesli sohbet WebSocket sunucusu
   // VOICE_CHAT_VERSION=v2 (varsayılan) → OpenAI Realtime (VAD+STT+LLM) + ElevenLabs WS streaming TTS
   // VOICE_CHAT_VERSION=v1 → legacy pipeline (ElevenLabs STT + n8n + ElevenLabs TTS)
-  const wsPort = parseInt(process.env.REALTIME_WS_PORT) || 3001;
+  const wsPath = process.env.REALTIME_WS_PATH || '/realtime';
   const voiceChatVersion = (process.env.VOICE_CHAT_VERSION || 'v2').toLowerCase();
 
   if (voiceChatVersion === 'v1') {
-    const voiceChatServer = new VoiceChatServer(wsPort);
-    voiceChatServer.start();
-    console.log(`✅ Voice Chat v1 (legacy) ready on port ${wsPort}`);
+    const voiceChatServer = new VoiceChatServer();
+    voiceChatServer.start({ server, path: wsPath });
+    console.log(`✅ Voice Chat v1 (legacy) ready on HTTP port ${PORT}, path ${wsPath}`);
   } else {
-    const voiceChatServer = new VoiceChatServerV2(wsPort);
-    voiceChatServer.start();
-    console.log(`✅ Voice Chat v2 (OpenAI+ElevenLabs streaming) ready on port ${wsPort}`);
+    const voiceChatServer = new VoiceChatServerV2();
+    voiceChatServer.start({ server, path: wsPath });
+    console.log(`✅ Voice Chat v2 (OpenAI+ElevenLabs streaming) ready on HTTP port ${PORT}, path ${wsPath}`);
   }
   
   // Emit ready event for PM2 wait_ready
