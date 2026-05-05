@@ -85,15 +85,23 @@ class AppointmentService {
       // Ensure appointmentDate is in ISO 8601 format
       const isoAppointmentDate = date.toISOString();
 
-      // Check if user already has an upcoming (not completed/cancelled) appointment
-      // findUpcomingByUserId already filters for future appointments (>= now) and excludes cancelled ones
-      const existingAppointment = await AppointmentRepository.findUpcomingByUserId(userId);
+      // Kural: Kullanıcı her bir koçtan yalnızca 1 kez randevu oluşturabilir.
+      const existingAppointment = await AppointmentRepository.findByUserAndConsultant(
+        userId,
+        consultantId
+      );
       if (existingAppointment) {
-        // If status is completed, allow new appointment. Otherwise, block it.
-        if (existingAppointment.status !== 'completed') {
-          const existingDate = new Date(existingAppointment.appointmentDate);
-          throw new Error(`User already has an upcoming appointment on ${existingDate.toISOString()} with status '${existingAppointment.status}'. Cannot create a new appointment.`);
-        }
+        throw new Error('User already has an appointment with this consultant');
+      }
+
+      // Kural: Kullanıcı aynı tarih-saat slotunda (koçtan bağımsız) sadece 1 aktif randevu alabilir.
+      const existingSameSlotAppointment =
+        await AppointmentRepository.findByUserAndDateTime(
+          userId,
+          isoAppointmentDate
+        );
+      if (existingSameSlotAppointment) {
+        throw new Error('User already has an appointment at this date and time');
       }
 
       // Create appointment with ISO formatted date
@@ -112,10 +120,18 @@ class AppointmentService {
       const notificationSubtitle = `${consultantName}, sizin için randevu oluşturdu`;
       const notificationMessage = 'Randevunuz oluşturuldu';
 
-      // Send notification via OneSignal and save to database (async, don't wait)
-      sendAppointmentNotification(userId, consultantId, notificationTitle, notificationSubtitle, appointment.id).catch(err => {
-        console.error('⚠️ Failed to send appointment notification:', err.message);
-      });
+      // Önce kullanıcıya mesaj dönsün, ardından bildirimi gönder.
+      setTimeout(() => {
+        sendAppointmentNotification(
+          userId,
+          consultantId,
+          notificationTitle,
+          notificationSubtitle,
+          appointment.id
+        ).catch(err => {
+          console.error('⚠️ Failed to send appointment notification:', err.message);
+        });
+      }, 1500);
 
       return {
         success: true,
@@ -241,10 +257,14 @@ class AppointmentService {
  */
 async function sendAppointmentNotification(userId, consultantId, title, subtitle, appointmentId) {
   try {
+    const consultant = await ConsultantService.getConsultantById(consultantId);
+    const consultantPhotoUrl = consultant?.photoURL || null;
+
     const metadata = {
       type: 'appointment',
       appointmentId: appointmentId,
       consultantId: consultantId,
+      consultantPhotoUrl,
       timestamp: new Date().toISOString()
     };
 

@@ -40,6 +40,18 @@ router.post('/webhook', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating appointment from webhook:', error);
+    if (error.message === 'User already has an appointment with this consultant') {
+      return res.status(409).json({
+        success: false,
+        error: error.message
+      });
+    }
+    if (error.message === 'User already has an appointment at this date and time') {
+      return res.status(409).json({
+        success: false,
+        error: error.message
+      });
+    }
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'

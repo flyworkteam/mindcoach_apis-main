@@ -140,6 +140,62 @@ class AppointmentRepository {
   }
 
   /**
+   * Find latest appointment by user and consultant
+   * @param {number} userId - User ID
+   * @param {number} consultantId - Consultant ID
+   * @returns {Promise<Appointment|null>} Latest appointment or null
+   */
+  static async findByUserAndConsultant(userId, consultantId) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT * FROM appointments
+         WHERE user_id = ? AND consultant_id = ?
+         ORDER BY appointment_date DESC
+         LIMIT 1`,
+        [userId, consultantId]
+      );
+
+      if (rows.length === 0) {
+        return null;
+      }
+
+      return this.mapRowToAppointment(rows[0]);
+    } catch (error) {
+      console.error('Error finding appointment by user and consultant:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Find appointment by user and exact datetime slot (coach independent)
+   * @param {number} userId - User ID
+   * @param {string} appointmentDate - Appointment date (ISO 8601 format)
+   * @returns {Promise<Appointment|null>} Matching appointment or null
+   */
+  static async findByUserAndDateTime(userId, appointmentDate) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT * FROM appointments
+         WHERE user_id = ?
+           AND appointment_date = ?
+           AND status != 'cancelled'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId, appointmentDate]
+      );
+
+      if (rows.length === 0) {
+        return null;
+      }
+
+      return this.mapRowToAppointment(rows[0]);
+    } catch (error) {
+      console.error('Error finding appointment by user and datetime:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Find appointments by consultant ID
    * @param {number} consultantId - Consultant ID
    * @returns {Promise<Array<Appointment>>} Array of appointments
