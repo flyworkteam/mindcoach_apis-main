@@ -7,6 +7,7 @@ const chats = require('./routes/chats');
 const appointments = require('./routes/appointments');
 const moods = require('./routes/moods');
 const notifications = require('./routes/notifications');
+const premium = require('./routes/premium');
 const errorHandler = require('./middleware/errorHandler');
 const SocketHandler = require('./socket/socketHandler');
 const VoiceChatServer = require('./realtime/voiceChatServer');
@@ -138,6 +139,9 @@ app.use('/appointments', circuitBreakerMiddleware('database'), appointments);
 app.use('/moods', circuitBreakerMiddleware('database'), moods);
 app.use('/notifications', circuitBreakerMiddleware('database'), notifications);
 app.use('/motivationtexts', circuitBreakerMiddleware('database'), require('./routes/motivations'));
+
+// Premium (device-based) routes - no auth required for device status check, general rate limiting
+app.use('/api/v1/premium', generalLimiter, circuitBreakerMiddleware('database'), premium);
 
 // Health check endpoint (bypass rate limiting)
 app.get('/health', (req, res) => {
