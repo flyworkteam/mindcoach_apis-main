@@ -765,6 +765,13 @@ const RHUBARB_MAP = {
 
 // Turkish-specific overrides (letters with distinct phonemes not in English)
 const TR_MAP = { 'Ğ':1, 'Ş':15, 'Ç':18, 'İ':2, 'Ö':6, 'Ü':7 };
+// Global viseme timing speed-up:
+// 1.0 = original timing (server zamanlaması, sıkıştırma yok — doğal tempo).
+const VISEME_TIME_SCALE = (() => {
+  const raw = Number(process.env.VISEME_TIME_SCALE || '1.0');
+  if (!Number.isFinite(raw)) return 1.0;
+  return Math.min(1.0, Math.max(0.2, raw));
+})();
 
 /**
  * Convert plain text into a [{id, t}] viseme timeline.
@@ -782,22 +789,22 @@ const TR_MAP = { 'Ğ':1, 'Ş':15, 'Ç':18, 'İ':2, 'Ö':6, 'Ü':7 };
 function _generateVisemeTimeline(text) {
   if (!text) return [];
 
-  // ~30 char/sn hedefi: ses süresi boyunca çok daha sık keyframe (istem).
-  // ElevenLabs TR genelde 14–18 ch/sn; biraz sık = dudak audio'dan hafif
-  // önde ama "hareketli" görünür; client RMS ile tamamlanır.
-  const MS_PER_CHAR  = 32;
-  const MS_SPACE     = 36;
-  const MS_COMMA     = 85;
-  const MS_SENTENCE  = 160;
-  // Aynı viseme tekrarında kısa kapan→aç — yoğun titreme.
-  const MS_REPEAT_TRANSIT = 14;
+  // ~6.7 char/sn hedefi: MS_PER_CHAR=150, VISEME_TIME_SCALE=1.0 → keyframe
+  // aralığı 150ms. Çok sakin tempo — ağız hareketleri belirgin ve yavaş.
+  const MS_PER_CHAR  = 150;
+  const MS_SPACE     = 170;
+  const MS_COMMA     = 340;
+  const MS_SENTENCE  = 600;
+  // Aynı viseme tekrarında kısa kapan→aç — yavaş titreme.
+  const MS_REPEAT_TRANSIT = 75;
 
   const visemes = [];
   let t = 0;
   let lastId = -1;
+  const scaleMs = (ms) => Math.max(0, Math.round(ms * VISEME_TIME_SCALE));
 
   const emit = (id, when) => {
-    visemes.push({ id, t: Math.round(when) });
+    visemes.push({ id, t: scaleMs(when) });
     lastId = id;
   };
 
@@ -838,7 +845,7 @@ function _generateVisemeTimeline(text) {
   }
 
   // Always end with mouth-closed
-  if (lastId !== 0) visemes.push({ id: 0, t: Math.round(t) + 100 });
+  if (lastId !== 0) visemes.push({ id: 0, t: scaleMs(t + 100) });
 
   return visemes;
 }
@@ -1671,6 +1678,8 @@ class VoiceChatServerV2 {
 
     this._sendJson(ctx.ws, {
       type: 'viseme_timeline',
+      timeline: visemes,
+      startOffsetMs: 0,
       sampleRate: 24000,
       visemes,
     });

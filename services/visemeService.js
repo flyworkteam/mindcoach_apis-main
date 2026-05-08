@@ -88,9 +88,9 @@ function generateEnergyVisemesFromPcm24k(pcmBuffer) {
   const bytesPerSample = 2;
   const totalSamples = Math.floor(pcmBuffer.length / bytesPerSample);
   if (totalSamples <= 0) return [];
-  // Rhubarb kapalıyken energy fallback: pencereyi küçük tut ki saniyede
-  // ~40+ viseme update olsun (client RMS ile uyumlu yoğun hareket).
-  const windowMs = 22;
+  // Rhubarb kapalıyken energy fallback: saniyede ~13 viseme update —
+  // çok sakin tempo, client blend süreleriyle (20ms) uyumlu.
+  const windowMs = 75;
   const samplesPerWindow = Math.max(1, Math.floor((24000 * windowMs) / 1000));
   const result = [];
   let lastId = -1;
@@ -105,14 +105,16 @@ function generateEnergyVisemesFromPcm24k(pcmBuffer) {
     }
     if (count === 0) continue;
     const rms = Math.sqrt(sumSq / count);
-    // Eşikler düşürüldü ki düşük amplitüdlü heceler bile ağız değişimi
-    // tetiklesin.
+    // Eşikler daha düşük: hafif amplitüdlü heceler bile farklı viseme'ye
+    // sıçrar → ağız sürekli hareket eder, "yavaş konuşma" izlenimi olmaz.
     let id = 0;
-    if (rms > 600)  id = 2;
-    if (rms > 1200) id = 6;
-    if (rms > 2000) id = 7;
-    if (rms > 3000) id = 8;
-    if (rms > 4500) id = 15;
+    if (rms > 400) id = 2;
+    if (rms > 850) id = 4;
+    if (rms > 1400) id = 6;
+    if (rms > 2000) id = 8;
+    if (rms > 2800) id = 10;
+    if (rms > 3800) id = 12;
+    if (rms > 4800) id = 15;
     // Aynı id arka arkaya geldiğinde araya kısa bir close (id=0) sok →
     // mouth flicker olsun, statik kalmasın.
     if (id !== 0 && id === lastId) {
