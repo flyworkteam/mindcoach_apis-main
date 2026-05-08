@@ -147,6 +147,81 @@ class ConsultantRepository {
   }
 
   /**
+   * Create a new consultant
+   * @param {Object} data - Consultant data
+   * @returns {Promise<Consultant>} Newly created consultant
+   */
+  static async create(data) {
+    try {
+      const {
+        names = {},
+        mainPrompt = '',
+        photoURL = null,
+        voiceId = null,
+        url3d = null,
+        explanation = null,
+        features = [],
+        job = '',
+        roles = [],
+        rating = 0,
+      } = data;
+
+      // created_date: ISO date (YYYY-MM-DD); created_at: timestamp default
+      const createdDate =
+        data.createdDate || new Date().toISOString().slice(0, 10);
+
+      const namesJson = JSON.stringify(names);
+      const featuresJson = JSON.stringify(features);
+      const rolesJson = JSON.stringify(roles);
+
+      const [result] = await pool.execute(
+        `INSERT INTO consultants
+          (names, main_prompt, photo_url, voice_id, \`3d_url\`,
+           created_date, explanation, features, job, roles, rating)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          namesJson,
+          mainPrompt,
+          photoURL,
+          voiceId,
+          url3d,
+          createdDate,
+          explanation,
+          featuresJson,
+          job,
+          rolesJson,
+          rating,
+        ]
+      );
+
+      const insertedId = result.insertId;
+      return await this.findById(insertedId);
+    } catch (error) {
+      console.error('Error creating consultant:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get distinct list of existing rehberlik alanları (job values).
+   * Empty/null jobs are filtered out.
+   * @returns {Promise<Array<string>>}
+   */
+  static async getAllJobs() {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT DISTINCT job FROM consultants
+         WHERE job IS NOT NULL AND TRIM(job) <> ''
+         ORDER BY job ASC`
+      );
+      return rows.map((r) => r.job);
+    } catch (error) {
+      console.error('Error getting all jobs:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Find consultants by date range
    * @param {string} startDate - Start date (ISO 8601 format)
    * @param {string} endDate - End date (ISO 8601 format)

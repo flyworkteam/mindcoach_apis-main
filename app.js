@@ -143,6 +143,10 @@ app.use('/motivationtexts', circuitBreakerMiddleware('database'), require('./rou
 // Premium (device-based) routes - no auth required for device status check, general rate limiting
 app.use('/api/v1/premium', generalLimiter, circuitBreakerMiddleware('database'), premium);
 
+// Admin routes - protected with ADMIN_API_KEY (see middleware/adminAuth.js).
+// Strict rate limiting (authLimiter) + database circuit breaker.
+app.use('/admin', authLimiter, circuitBreakerMiddleware('database'), require('./routes/admin'));
+
 // Health check endpoint (bypass rate limiting)
 app.get('/health', (req, res) => {
   res.json({ 
