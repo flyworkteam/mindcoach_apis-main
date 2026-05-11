@@ -108,9 +108,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Production-grade rate limiting (apply to all routes except health checks)
-app.use(generalLimiter);
-
 // CORS middleware (mobil uygulama için gerekli)
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -122,30 +119,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes with rate limiting and circuit breaker protection
-// Authentication routes - stricter rate limiting
-app.use('/auth', authLimiter, circuitBreakerMiddleware('database'), auth);
-
-// Chat routes - no rate limiting and no webhook circuit breaker (removed for better user experience)
-// Only database circuit breaker remains for protection
+// Routes
+app.use('/auth', circuitBreakerMiddleware('database'), auth);
 app.use('/chats', circuitBreakerMiddleware('database'), chats);
-// Video/Stream call - expensive operations only (POST)
-app.use('/video-call', expensiveOperationLimiter, circuitBreakerMiddleware('database'), circuitBreakerMiddleware('webhook'), require('./routes/videoCall'));
-app.use('/stream-call', expensiveOperationLimiter, circuitBreakerMiddleware('database'), circuitBreakerMiddleware('webhook'), require('./routes/streamCall'));
-
-// Regular routes - general rate limiting and database circuit breaker
+app.use('/video-call', circuitBreakerMiddleware('database'), circuitBreakerMiddleware('webhook'), require('./routes/videoCall'));
+app.use('/stream-call', circuitBreakerMiddleware('database'), circuitBreakerMiddleware('webhook'), require('./routes/streamCall'));
 app.use('/consultants', circuitBreakerMiddleware('database'), consultants);
 app.use('/appointments', circuitBreakerMiddleware('database'), appointments);
 app.use('/moods', circuitBreakerMiddleware('database'), moods);
 app.use('/notifications', circuitBreakerMiddleware('database'), notifications);
 app.use('/motivationtexts', circuitBreakerMiddleware('database'), require('./routes/motivations'));
-
-// Premium (device-based) routes - no auth required for device status check, general rate limiting
-app.use('/api/v1/premium', generalLimiter, circuitBreakerMiddleware('database'), premium);
-
-// Admin routes - protected with ADMIN_API_KEY (see middleware/adminAuth.js).
-// Strict rate limiting (authLimiter) + database circuit breaker.
-app.use('/admin', authLimiter, circuitBreakerMiddleware('database'), require('./routes/admin'));
+app.use('/api/v1/premium', circuitBreakerMiddleware('database'), premium);
+app.use('/admin', circuitBreakerMiddleware('database'), require('./routes/admin'));
 
 // Health check endpoint (bypass rate limiting)
 app.get('/health', (req, res) => {
