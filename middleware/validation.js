@@ -7,10 +7,10 @@ const validateAuthRequest = (req, res, next) => {
   const { provider } = req.params;
   const { body } = req;
 
-  if (!provider || !['google', 'facebook', 'apple', 'guest'].includes(provider)) {
+  if (!provider || !['google', 'apple', 'guest'].includes(provider)) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid provider. Must be one of: google, facebook, apple, guest'
+      error: 'Invalid provider. Must be one of: google, apple, guest'
     });
   }
 
@@ -22,14 +22,6 @@ const validateAuthRequest = (req, res, next) => {
           return res.status(400).json({
             success: false,
             error: 'idToken is required for Google authentication'
-          });
-        }
-        break;
-      case 'facebook':
-        if (!body.accessToken) {
-          return res.status(400).json({
-            success: false,
-            error: 'accessToken is required for Facebook authentication'
           });
         }
         break;
@@ -57,4 +49,3 @@ const validateAuthRequest = (req, res, next) => {
 module.exports = {
   validateAuthRequest,
 };
-

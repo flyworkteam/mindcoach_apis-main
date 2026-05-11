@@ -158,34 +158,8 @@ router.post('/', authenticate, upload.single('audio'), async (req, res, next) =>
       }
     }
 
-    // 8. Create message in database (optional - for chat history)
-    try {
-      const sentTime = new Date().toISOString();
-      const messageText = transcription || '[Stream Call Audio]';
-      
-      await require('../repositories/MessageRepository').create(
-        chat.chatId,
-        userId,
-        'user',
-        messageText,
-        sentTime,
-        false, // isFile
-        null, // fileURL
-        true, // isVoiceMessage
-        audioURL, // voiceURL
-        null, // imageContent
-        transcription // voiceMessageContent (transcription from webhook)
-      );
-
-      // Update chat last message
-      await require('../repositories/ChatRepository').updateLastMessage(
-        chat.chatId,
-        messageText,
-        sentTime
-      );
-    } catch (dbError) {
-      console.error(`[STREAM-CALL] ⚠️ Database kayıt hatası (non-critical):`, dbError);
-    }
+    // 8. Stream/voice call conversations are NOT persisted to DB.
+    //    They stay within the call session only and don't appear in chat.
 
     // 9. Return response
     // Note: Webhook hatası olsa bile audio CDN'e yüklendiği için success response döndürülür

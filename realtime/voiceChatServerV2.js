@@ -2130,41 +2130,14 @@ class VoiceChatServerV2 {
     return false;
   }
 
-  async _saveUserMessage(ctx, transcript) {
-    const chatId = await this._ensureChatId(ctx);
-    if (!chatId) return;
-    try {
-      const now = new Date().toISOString();
-      await this._persistWithRetry(
-        async () => {
-          await MessageRepository.create(
-            chatId, ctx.userId, 'user', transcript, now,
-            false, null, true, null, null, transcript
-          );
-          await ChatRepository.updateLastMessage(chatId, transcript, now);
-        },
-        { label: `user_msg chat=${chatId}` }
-      );
-    } catch (e) {
-      console.warn('[VCv2] ⚠️ save user msg:', e.message);
-    }
+  async _saveUserMessage(_ctx, _transcript) {
+    // Voice/video call conversations are NOT persisted to DB.
+    // They stay only within the realtime session.
   }
 
-  async _saveAssistantMessage(ctx, text) {
-    const chatId = await this._ensureChatId(ctx);
-    if (!chatId) return;
-    try {
-      const now = new Date().toISOString();
-      await this._persistWithRetry(
-        async () => {
-          await ChatService.createConsultantTextMessage(chatId, ctx.consultantId, text, now);
-          await ChatRepository.updateLastMessage(chatId, text, now);
-        },
-        { label: `assistant_msg chat=${chatId}` }
-      );
-    } catch (e) {
-      console.warn('[VCv2] ⚠️ save assistant msg:', e.message);
-    }
+  async _saveAssistantMessage(_ctx, _text) {
+    // Voice/video call conversations are NOT persisted to DB.
+    // They stay only within the realtime session.
   }
 
   // ───────────────────────────────────────────────────────────────────────────

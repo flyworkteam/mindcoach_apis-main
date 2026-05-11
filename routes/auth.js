@@ -213,15 +213,6 @@ router.post("/:provider", validateAuthRequest, async (req, res, next) => {
         }
         providerData = await AuthService.verifyGoogleToken(body.idToken);
         break;
-      case "facebook":
-        if (!body.accessToken) {
-          return res.status(400).json({
-            success: false,
-            error: "accessToken is required for Facebook authentication"
-          });
-        }
-        providerData = await AuthService.verifyFacebookToken(body.accessToken);
-        break;
       case "apple":
         if (!body.identityToken && !body.userIdentifier) {
           return res.status(400).json({
@@ -252,7 +243,7 @@ router.post("/:provider", validateAuthRequest, async (req, res, next) => {
       default:
         return res.status(400).json({
           success: false,
-          error: "Invalid provider. Must be one of: google, facebook, apple, guest"
+          error: "Invalid provider. Must be one of: google, apple, guest"
         });
     }
 

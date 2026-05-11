@@ -55,24 +55,9 @@ class RealtimeChatService {
         throw new Error(`Failed to transcribe audio: ${transcriptionError.message}`);
       }
 
-      // Step 2: Send transcribed message to chat service (this will call webhook)
-      let chatResult;
-      try {
-        chatResult = await ChatService.sendMessage(
-          userId,
-          consultantId,
-          transcribedText,
-          false, // isFile
-          null,  // fileURL
-          true,  // isVoiceMessage
-          null,  // voiceURL (will be set by webhook response if needed)
-          null,  // imageContent
-          transcribedText // voiceMessageContent (transcript)
-        );
-      } catch (chatError) {
-        console.error('Chat service error:', chatError);
-        // Continue even if chat service fails
-      }
+      // Voice/video call conversations are NOT persisted to DB.
+      // They stay within the realtime session only.
+      let chatResult = null;
 
       // Step 3: Get AI response from webhook
       // Note: In production, you would get the actual response from the webhook

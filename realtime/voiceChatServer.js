@@ -477,25 +477,12 @@ class VoiceChatServer {
 
   // ── DB ────────────────────────────────────────────────────────────────────────
 
-  async _saveUserMessage(state, transcript) {
-    if (!state.chatId) return;
-    try {
-      const now = new Date().toISOString();
-      await MessageRepository.create(
-        state.chatId, state.userId, 'user', transcript, now,
-        false, null, true, null, null, transcript
-      );
-      await ChatRepository.updateLastMessage(state.chatId, transcript, now);
-    } catch (e) { console.warn('[VOICE-CHAT] ⚠️ saveUserMessage:', e.message); }
+  async _saveUserMessage(_state, _transcript) {
+    // Voice/video call conversations are NOT persisted to DB.
   }
 
-  async _saveAIMessage(state, aiText) {
-    if (!state.chatId) return;
-    try {
-      const now = new Date().toISOString();
-      await ChatService.createConsultantTextMessage(state.chatId, state.consultantId, aiText, now);
-      await ChatRepository.updateLastMessage(state.chatId, aiText, now);
-    } catch (e) { console.warn('[VOICE-CHAT] ⚠️ saveAIMessage:', e.message); }
+  async _saveAIMessage(_state, _aiText) {
+    // Voice/video call conversations are NOT persisted to DB.
   }
 
   // ── sistem prompt ─────────────────────────────────────────────────────────────
