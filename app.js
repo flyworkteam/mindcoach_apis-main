@@ -184,7 +184,7 @@ app.use(errorHandler);
 
 
 
-const PORT = process.env.PORT || 3020;
+const PORT = 3010;
 
 // Graceful shutdown handling
 let isShuttingDown = false;
