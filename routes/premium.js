@@ -16,6 +16,8 @@ const { authenticate } = require('../middleware/auth');
 router.get('/device-status/:deviceId', async (req, res, next) => {
   try {
     const { deviceId } = req.params;
+    const userIdRaw = req.query.userId;
+    const userId = userIdRaw ? parseInt(userIdRaw, 10) : null;
 
     if (!deviceId) {
       return res.status(400).json({
@@ -24,7 +26,10 @@ router.get('/device-status/:deviceId', async (req, res, next) => {
       });
     }
 
-    const status = await PremiumService.checkAndValidatePremium(deviceId);
+    const status = await PremiumService.checkAndValidatePremium(
+      deviceId,
+      Number.isFinite(userId) ? userId : null,
+    );
 
     res.status(200).json(status);
   } catch (error) {
@@ -41,7 +46,7 @@ router.get('/device-status/:deviceId', async (req, res, next) => {
  */
 router.post('/initialize', async (req, res, next) => {
   try {
-    const { deviceId } = req.body;
+    const { deviceId, userId } = req.body;
 
     if (!deviceId) {
       return res.status(400).json({
@@ -50,7 +55,11 @@ router.post('/initialize', async (req, res, next) => {
       });
     }
 
-    const status = await PremiumService.initializeDevice(deviceId);
+    const parsedUserId = userId != null ? parseInt(userId, 10) : null;
+    const status = await PremiumService.initializeDevice(
+      deviceId,
+      Number.isFinite(parsedUserId) ? parsedUserId : null,
+    );
 
     res.status(200).json(status);
   } catch (error) {
@@ -82,9 +91,9 @@ router.post('/confirm-purchase', async (req, res, next) => {
 
     const result = await PremiumService.confirmPurchase({
       deviceId,
-      userId,
+      userId: userId ?? null,
       receiptData,
-      packageIdentifier,
+      packageIdentifier: packageIdentifier ?? null,
     });
 
     res.status(200).json(result);

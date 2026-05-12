@@ -8,27 +8,70 @@ const PremiumDevice = require('../models/PremiumDevice');
 
 class PremiumService {
   /**
-   * Initialize premium for a device (on app first launch)
-   * @param {string} deviceId - Device ID
+   * Initialize / sync premium for a device on app launch or auth transition.
+   *
+   * Identity model (account-based premium):
+   *  - Premium primarily belongs to userId. Cross-device: user logs in
+   *    on any device and gets their existing premium.
+   *  - If guest (userId=null), premium is tracked only by deviceId.
+   *  - Trial uniqueness: a user (lifetime) OR a guest device may consume
+   *    one 3-day trial. Account-switching on the same device cannot farm
+   *    new trials because the device row's prior trial blocks new ones
+   *    via the `findByDeviceId` short-circuit below.
+   *
+   * @param {string} deviceId
+   * @param {number|null} userId
    * @returns {Promise<Object>} Premium status
    */
-  static async initializeDevice(deviceId) {
+  static async initializeDevice(deviceId, userId = null) {
     try {
-      // Check if device already has premium record
-      let device = await PremiumDeviceRepository.findByDeviceId(deviceId);
-
-      if (device) {
-        // Device already exists, just return status
-        return this.getPremiumStatus(deviceId);
+      // 1) User logged in → check for an existing active premium on any device.
+      if (userId) {
+        const userPremium = await PremiumDeviceRepository.findActivePremiumByUserId(userId);
+        if (userPremium && !userPremium.isExpired()) {
+          return {
+            success: true,
+            isPremium: true,
+            planId: userPremium.planId,
+            daysRemaining: userPremium.getDaysRemaining(),
+            expiryDate: userPremium.expiryDate,
+            isTrial: userPremium.isTrial,
+          };
+        }
       }
 
-      // Create new device with 3-day trial
-      const now = new Date();
-      const expiryDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000); // +3 days
+      // 2) Device already has a row → don't grant new trial. Link userId if missing.
+      const existing = await PremiumDeviceRepository.findByDeviceId(deviceId);
+      if (existing) {
+        if (userId && !existing.userId) {
+          await PremiumDeviceRepository.linkUserToDevice(deviceId, userId);
+        }
+        return this.getPremiumStatus(deviceId, userId);
+      }
 
-      device = await PremiumDeviceRepository.createOrUpdate({
+      // 3) No device row. Trial eligibility: user must not have used one before.
+      const userHadTrial = userId
+        ? await PremiumDeviceRepository.hasUsedTrialByUserId(userId)
+        : false;
+
+      if (userHadTrial) {
+        return {
+          success: true,
+          isPremium: false,
+          daysRemaining: 0,
+          expiryDate: null,
+          isTrial: false,
+          reason: 'trial_already_used',
+        };
+      }
+
+      // 4) Grant new 3-day trial.
+      const now = new Date();
+      const expiryDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+      await PremiumDeviceRepository.createOrUpdate({
         deviceId,
-        userId: null, // Not linked to user until purchase
+        userId: userId || null,
         isPremium: true,
         expiryDate: expiryDate.toISOString(),
         purchasedDate: null,
@@ -54,17 +97,27 @@ class PremiumService {
   }
 
   /**
-   * Get premium status for device
-   * @param {string} deviceId - Device ID
-   * @returns {Promise<Object>}
+   * Get premium status. Prefers user-scoped lookup when userId is provided.
+   * @param {string} deviceId
+   * @param {number|null} userId
    */
-  static async getPremiumStatus(deviceId) {
+  static async getPremiumStatus(deviceId, userId = null) {
     try {
+      if (userId) {
+        const userPremium = await PremiumDeviceRepository.findActivePremiumByUserId(userId);
+        if (userPremium && !userPremium.isExpired()) {
+          return {
+            success: true,
+            isPremium: true,
+            daysRemaining: userPremium.getDaysRemaining(),
+            expiryDate: userPremium.expiryDate,
+            planId: userPremium.planId,
+            isTrial: userPremium.isTrial,
+          };
+        }
+      }
       const status = await PremiumDeviceRepository.getPremiumStatus(deviceId);
-      return {
-        success: true,
-        ...status,
-      };
+      return { success: true, ...status };
     } catch (error) {
       console.error('❌ Error getting premium status:', error);
       throw error;
@@ -125,36 +178,39 @@ class PremiumService {
   }
 
   /**
-   * Check and validate premium for device
-   * @param {string} deviceId - Device ID
-   * @returns {Promise<Object>}
+   * Check and validate premium. User-scoped if userId given, else device-scoped.
+   * Side-effect: marks expired rows as inactive (lazy expiration).
+   * @param {string} deviceId
+   * @param {number|null} userId
    */
-  static async checkAndValidatePremium(deviceId) {
+  static async checkAndValidatePremium(deviceId, userId = null) {
     try {
+      if (userId) {
+        const userPremium = await PremiumDeviceRepository.findActivePremiumByUserId(userId);
+        if (userPremium) {
+          if (userPremium.isExpired()) {
+            await PremiumDeviceRepository.deactivatePremium(userPremium.deviceId);
+          } else {
+            return {
+              success: true,
+              isPremium: true,
+              daysRemaining: userPremium.getDaysRemaining(),
+              expiryDate: userPremium.expiryDate,
+              planId: userPremium.planId,
+              isTrial: userPremium.isTrial,
+            };
+          }
+        }
+      }
+
       const device = await PremiumDeviceRepository.findByDeviceId(deviceId);
-
       if (!device) {
-        // Device not found, return not premium
-        return {
-          success: true,
-          isPremium: false,
-          daysRemaining: 0,
-          expiryDate: null,
-        };
+        return { success: true, isPremium: false, daysRemaining: 0, expiryDate: null };
       }
-
-      // Check if premium has expired
       if (device.isPremium && device.isExpired()) {
-        // Deactivate premium
         await PremiumDeviceRepository.deactivatePremium(deviceId);
-        return {
-          success: true,
-          isPremium: false,
-          daysRemaining: 0,
-          expiryDate: null,
-        };
+        return { success: true, isPremium: false, daysRemaining: 0, expiryDate: null };
       }
-
       return {
         success: true,
         isPremium: device.isPremium,

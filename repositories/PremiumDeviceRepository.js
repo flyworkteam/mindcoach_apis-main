@@ -137,6 +137,61 @@ class PremiumDeviceRepository {
   }
 
   /**
+   * Find the most recent active premium row for a user (any device).
+   * Used for cross-device premium: user logs in on a new device and we
+   * find their existing entitlement.
+   * @param {number} userId
+   * @returns {Promise<PremiumDevice|null>}
+   */
+  static async findActivePremiumByUserId(userId) {
+    return executeWithRetry(async () => {
+      const [rows] = await pool.execute(
+        `SELECT * FROM premium_devices
+         WHERE user_id = ? AND is_premium = 1
+         ORDER BY expiry_date DESC
+         LIMIT 1`,
+        [userId]
+      );
+      return rows.length > 0 ? new PremiumDevice(rows[0]) : null;
+    }, 2, 'findActivePremiumByUserId');
+  }
+
+  /**
+   * Has this user ever consumed a trial (on any device)?
+   * @param {number} userId
+   * @returns {Promise<boolean>}
+   */
+  static async hasUsedTrialByUserId(userId) {
+    return executeWithRetry(async () => {
+      const [rows] = await pool.execute(
+        `SELECT 1 FROM premium_devices
+         WHERE user_id = ? AND is_trial = 1
+         LIMIT 1`,
+        [userId]
+      );
+      return rows.length > 0;
+    }, 2, 'hasUsedTrialByUserId');
+  }
+
+  /**
+   * Link an existing guest device row (user_id IS NULL) to a user.
+   * No-op if the row already has a user_id.
+   * @param {string} deviceId
+   * @param {number} userId
+   */
+  static async linkUserToDevice(deviceId, userId) {
+    return executeWithRetry(async () => {
+      const now = new Date().toISOString();
+      await pool.execute(
+        `UPDATE premium_devices
+         SET user_id = ?, updated_at = ?
+         WHERE device_id = ? AND user_id IS NULL`,
+        [userId, now, deviceId]
+      );
+    }, 2, 'linkUserToDevice');
+  }
+
+  /**
    * Check if device has active premium
    * @param {string} deviceId - Device ID
    * @returns {Promise<boolean>}

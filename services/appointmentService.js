@@ -42,42 +42,23 @@ class AppointmentService {
         throw new Error('Invalid appointment date format. Expected ISO 8601 format.');
       }
 
-      // Validate appointment date rules and auto-correct if needed:
-      // 1. Cannot be in the past (must be at least 1 day from now)
-      // 2. Must be between 08:00 and 23:00
+      // Validate appointment date: only rule is "must be in the future".
+      // Saat aralığı kısıtlaması yok — client zaten 00:00-23:30 arası geçerli
+      // slot listesi gösteriyor. AI/webhook senaryosunda da kullanıcının
+      // seçtiği saatlere uyulması beklenir; geçmişteki tarihler 1 saat ileriye
+      // otomatik düzeltilir (AI flow'unu kırmamak için).
       const now = new Date();
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0); // Start of tomorrow
 
       let needsCorrection = false;
       let correctionReason = '';
 
-      // Check if date is at least 1 day from now
-      if (date < tomorrow) {
+      if (date <= now) {
         needsCorrection = true;
-        correctionReason = 'Date is in the past or today';
-        // Set to tomorrow at 08:00
-        date = new Date(tomorrow);
-        date.setHours(8, 0, 0, 0);
+        correctionReason = 'Date is in the past';
+        // Şu andan 1 saat sonrasına yuvarla.
+        date = new Date(now.getTime() + 60 * 60 * 1000);
       }
 
-      // Check if time is between 08:00 and 23:00 (08:00 included, 23:00 excluded)
-      const appointmentHour = date.getHours();
-      if (appointmentHour < 8 || appointmentHour >= 23) {
-        if (!needsCorrection) {
-          needsCorrection = true;
-          correctionReason = 'Time is outside allowed range (08:00-22:59)';
-        }
-        // Adjust time to 08:00 if before 08:00, or to 22:00 if 23:00 or later
-        if (appointmentHour < 8) {
-          date.setHours(8, 0, 0, 0);
-        } else {
-          date.setHours(22, 0, 0, 0);
-        }
-      }
-
-      // If correction was made, log it
       if (needsCorrection) {
         console.warn(`[APPOINTMENT] ⚠️ Invalid appointment date corrected: ${correctionReason}. Original: ${appointmentDate}, Corrected: ${date.toISOString()}`);
       }
