@@ -131,6 +131,7 @@ app.use('/notifications', circuitBreakerMiddleware('database'), notifications);
 app.use('/motivationtexts', circuitBreakerMiddleware('database'), require('./routes/motivations'));
 app.use('/api/v1/premium', circuitBreakerMiddleware('database'), premium);
 app.use('/admin', circuitBreakerMiddleware('database'), require('./routes/admin'));
+app.use('/panel', circuitBreakerMiddleware('database'), require('./routes/panel'));
 
 // Health check endpoint (bypass rate limiting)
 app.get('/health', (req, res) => {

@@ -228,6 +228,75 @@ class ConsultantRepository {
    * @param {Object} options - Query options (limit, offset, orderBy)
    * @returns {Promise<Array>} Array of consultants
    */
+  /**
+   * Update consultant fields (panel / admin).
+   * @param {number} id
+   * @param {Object} data
+   * @returns {Promise<Consultant|null>}
+   */
+  static async update(id, data = {}) {
+    try {
+      const updateFields = [];
+      const updateValues = [];
+
+      if (data.names !== undefined) {
+        updateFields.push('names = ?');
+        updateValues.push(JSON.stringify(data.names));
+      }
+      if (data.mainPrompt !== undefined) {
+        updateFields.push('main_prompt = ?');
+        updateValues.push(data.mainPrompt);
+      }
+      if (data.photoURL !== undefined) {
+        updateFields.push('photo_url = ?');
+        updateValues.push(data.photoURL);
+      }
+      if (data.voiceId !== undefined) {
+        updateFields.push('voice_id = ?');
+        updateValues.push(data.voiceId);
+      }
+      if (data.url3d !== undefined) {
+        updateFields.push('`3d_url` = ?');
+        updateValues.push(data.url3d);
+      }
+      if (data.explanation !== undefined) {
+        updateFields.push('explanation = ?');
+        updateValues.push(data.explanation);
+      }
+      if (data.features !== undefined) {
+        updateFields.push('features = ?');
+        updateValues.push(JSON.stringify(data.features));
+      }
+      if (data.job !== undefined) {
+        updateFields.push('job = ?');
+        updateValues.push(data.job);
+      }
+      if (data.roles !== undefined) {
+        updateFields.push('roles = ?');
+        updateValues.push(JSON.stringify(data.roles));
+      }
+      if (data.rating !== undefined) {
+        updateFields.push('rating = ?');
+        updateValues.push(Number(data.rating));
+      }
+
+      if (updateFields.length === 0) {
+        return await this.findById(id);
+      }
+
+      updateValues.push(id);
+      await pool.execute(
+        `UPDATE consultants SET ${updateFields.join(', ')} WHERE id = ?`,
+        updateValues
+      );
+
+      return await this.findById(id);
+    } catch (error) {
+      console.error('Error updating consultant:', error);
+      throw error;
+    }
+  }
+
   static async findByDateRange(startDate, endDate, options = {}) {
     try {
       const limit = options.limit || 100;
