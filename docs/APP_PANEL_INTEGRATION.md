@@ -1,5 +1,7 @@
 # MindCoach API — App Panel entegrasyon rehberi
 
+> **Ana döküman:** Kök dizindeki [`PANEL_ENTEGRASYON.md`](../PANEL_ENTEGRASYON.md) — yapılan işler, dosya listesi ve App Panel AI prompt’u burada bir arada.
+
 Bu belge, **dış yönetim paneli (App Panel)** ile MindCoach backend API’sinin nasıl konuştuğunu açıklar. Paneli geliştiren veya işleten yapay zekaya doğrudan verilebilir.
 
 ---

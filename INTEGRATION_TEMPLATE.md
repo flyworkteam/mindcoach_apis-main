@@ -34,7 +34,9 @@ Tam URL’ler panelde ayrı ayrı kaydedilir (örnek path’ler):
 | `/users/:id` | GET | Tek kullanıcı (opsiyonel) |
 | `/users/:id` | PATCH | Kullanıcı güncelleme |
 
-Detaylı JSON alanları: [`EXTERNAL_API_CONTRACT.md`](./EXTERNAL_API_CONTRACT.md) (v2).
+Detaylı JSON alanları: [`docs/EXTERNAL_API_CONTRACT.md`](./docs/EXTERNAL_API_CONTRACT.md) (v2).
+
+**MindCoach uygulaması:** Tam entegrasyon dökümanı → [`PANEL_ENTEGRASYON.md`](./PANEL_ENTEGRASYON.md)
 
 ---
 
