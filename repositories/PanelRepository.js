@@ -114,14 +114,24 @@ class PanelRepository {
     });
   }
 
-  static async findUsersPaginated(page = 1, limit = 20) {
+  static async findUsersPaginated(page = 1, limit = 20, search = '') {
     const safePage = Math.max(1, parseInt(page, 10) || 1);
     const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
     const offset = (safePage - 1) * safeLimit;
+    const query = String(search || '').trim();
+    const whereClause = query
+      ? `WHERE (
+          CAST(u.id AS CHAR) LIKE ?
+          OR COALESCE(u.username, '') LIKE ?
+          OR COALESCE(u.credential_data, '') LIKE ?
+        )`
+      : '';
+    const whereParams = query ? [`%${query}%`, `%${query}%`, `%${query}%`] : [];
 
     return executeWithRetry(async () => {
       const [countRows] = await pool.execute(
-        'SELECT COUNT(*) AS total FROM users'
+        `SELECT COUNT(*) AS total FROM users u ${whereClause}`,
+        whereParams
       );
       const total = Number(countRows[0]?.total || 0);
 
@@ -133,9 +143,10 @@ class PanelRepository {
                    AND (pd.expiry_date IS NULL OR pd.expiry_date > NOW())
                  LIMIT 1) AS is_premium
          FROM users u
+         ${whereClause}
          ORDER BY u.id DESC
          LIMIT ? OFFSET ?`,
-        [safeLimit, offset]
+        [...whereParams, safeLimit, offset]
       );
 
       return { rows, total, page: safePage, limit: safeLimit };
