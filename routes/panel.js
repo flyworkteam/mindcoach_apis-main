@@ -50,7 +50,21 @@ router.get('/users', async (req, res, next) => {
 /** @route GET /panel/users/:id */
 router.get('/users/:id', async (req, res, next) => {
   try {
-    const user = await PanelService.getUserById(req.params.id);
+    const includeDetails = String(req.query.includeDetails || '').toLowerCase() === 'true';
+    const user = await PanelService.getUserById(req.params.id, includeDetails);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    res.status(200).json({ contractVersion: '2', data: user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** @route GET /panel/users/:id/details */
+router.get('/users/:id/details', async (req, res, next) => {
+  try {
+    const user = await PanelService.getUserById(req.params.id, true);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
