@@ -7,7 +7,14 @@
 
 const router = require('express').Router();
 const { panelAuth } = require('../middleware/panelAuth');
+const { maybePanelConsultantUpload } = require('../middleware/panelConsultantUpload');
 const PanelService = require('../services/panelService');
+const {
+  parsePanelAgentBody,
+  panelPatchFromAgentBody,
+  processConsultantMediaUploads,
+  hasMediaFiles,
+} = require('./lib/panelConsultantMedia');
 
 router.use(panelAuth);
 
@@ -114,9 +121,13 @@ router.get('/agents/:id', async (req, res, next) => {
  * @route POST /panel/agents
  * @body  Consultant create payload (names, job, mainPrompt, ...)
  */
-router.post('/agents', async (req, res, next) => {
+router.post('/agents', maybePanelConsultantUpload, async (req, res, next) => {
   try {
-    const agent = await PanelService.createAgent(req.body || {});
+    const body = parsePanelAgentBody(req);
+    if (hasMediaFiles(req.files)) {
+      Object.assign(body, await processConsultantMediaUploads(req.files, body));
+    }
+    const agent = await PanelService.createAgent(body);
     res.status(201).json({ contractVersion: '2', data: agent });
   } catch (error) {
     if (error.statusCode === 400) {
@@ -131,17 +142,28 @@ router.post('/agents', async (req, res, next) => {
 });
 
 /** @route PATCH /panel/agents/:id */
-router.patch('/agents/:id', async (req, res, next) => {
+router.patch('/agents/:id', maybePanelConsultantUpload, async (req, res, next) => {
   try {
+    const body = parsePanelAgentBody(req);
+    if (hasMediaFiles(req.files)) {
+      Object.assign(body, await processConsultantMediaUploads(req.files, body));
+    }
     const agent = await PanelService.updateAgentFromPanel(
       req.params.id,
-      req.body || {}
+      panelPatchFromAgentBody(body)
     );
     if (!agent) {
       return res.status(404).json({ success: false, error: 'Agent not found' });
     }
     res.status(200).json({ contractVersion: '2', data: agent });
   } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        validationErrors: error.validationErrors || null,
+      });
+    }
     next(error);
   }
 });
