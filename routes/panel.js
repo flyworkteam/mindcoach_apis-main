@@ -9,6 +9,7 @@ const router = require('express').Router();
 const { panelAuth } = require('../middleware/panelAuth');
 const { maybePanelConsultantUpload } = require('../middleware/panelConsultantUpload');
 const PanelService = require('../services/panelService');
+const ElevenLabsService = require('../services/elevenLabsService');
 const {
   parsePanelAgentBody,
   panelPatchFromAgentBody,
@@ -84,6 +85,43 @@ router.get('/agents/options', (req, res, next) => {
     res.status(200).json({
       contractVersion: '2',
       data: PanelService.getAgentCatalog(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** @route GET /panel/voices?gender=female|male */
+router.get('/voices', async (req, res, next) => {
+  try {
+    const genderRaw = String(req.query.gender || '').trim().toLowerCase();
+    const gender = genderRaw === 'female' || genderRaw === 'male' ? genderRaw : null;
+    const voices = await ElevenLabsService.getVoices();
+
+    const mapped = (Array.isArray(voices) ? voices : []).map((v) => {
+      const labels = v?.labels || {};
+      const g = String(labels.gender || v?.gender || '')
+        .trim()
+        .toLowerCase();
+      return {
+        voiceId: v.voice_id || v.voiceId || '',
+        name: v.name || 'Unnamed voice',
+        gender: g === 'female' || g === 'male' ? g : 'unknown',
+        category: v.category || null,
+        previewUrl: v.preview_url || null,
+      };
+    });
+
+    const filteredByGender = gender ? mapped.filter((v) => v.gender === gender) : mapped;
+    const filtered = gender && filteredByGender.length === 0 ? mapped : filteredByGender;
+    res.status(200).json({
+      contractVersion: '2',
+      data: filtered,
+      meta: {
+        gender: gender || 'all',
+        total: filtered.length,
+        fallbackAllVoices: Boolean(gender && filteredByGender.length === 0),
+      },
     });
   } catch (error) {
     next(error);
