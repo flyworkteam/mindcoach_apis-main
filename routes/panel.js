@@ -40,7 +40,11 @@ router.get('/analyse', async (req, res, next) => {
 /** @route GET /panel/users */
 router.get('/users', async (req, res, next) => {
   try {
-    const result = await PanelService.listUsers(req.query.page, req.query.limit);
+    const result = await PanelService.listUsers(
+      req.query.page,
+      req.query.limit,
+      req.query.search
+    );
     res.status(200).json(result);
   } catch (error) {
     next(error);
