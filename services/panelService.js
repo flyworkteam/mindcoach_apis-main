@@ -58,6 +58,23 @@ class PanelService {
     };
   }
 
+  static resolveConsultantDisplayName(namesRaw, fallbackId) {
+    let names = namesRaw;
+    if (typeof namesRaw === 'string') {
+      try {
+        names = JSON.parse(namesRaw);
+      } catch {
+        names = {};
+      }
+    }
+    const tr = names?.tr;
+    const en = names?.en;
+    const any = names && typeof names === 'object'
+      ? Object.values(names).find((v) => typeof v === 'string' && v.trim())
+      : null;
+    return tr || en || any || `Rehber #${fallbackId}`;
+  }
+
   static mapAgentRowToPanelAgent(row, options = {}) {
     const consultant = ConsultantRepository.mapRowToConsultant(row);
     const names = consultant.names || {};
@@ -147,10 +164,68 @@ class PanelService {
     };
   }
 
-  static async getUserById(id) {
+  static async getUserById(id, includeDetails = false) {
     const row = await PanelRepository.findUserById(id);
     if (!row) return null;
-    return this.mapUserRowToPanelUser(row);
+    const user = this.mapUserRowToPanelUser(row);
+    if (!includeDetails) return user;
+
+    const [linkedAgentsRows, appointmentsRows] = await Promise.all([
+      PanelRepository.findUserLinkedAgents(id, 80),
+      PanelRepository.findUserAppointments(id, 300),
+    ]);
+
+    const nowMs = Date.now();
+    const linkedAgents = (linkedAgentsRows || []).map((r) => ({
+      agentId: String(r.id),
+      displayName: this.resolveConsultantDisplayName(r.names, r.id),
+      job: r.job || null,
+      photoURL: r.photo_url || null,
+      firstChatAt: r.first_chat_date
+        ? new Date(r.first_chat_date).toISOString()
+        : null,
+      lastMessageAt: r.last_message_date
+        ? new Date(r.last_message_date).toISOString()
+        : null,
+    }));
+
+    const appointments = (appointmentsRows || []).map((r) => {
+      const iso = r.appointment_date ? new Date(r.appointment_date).toISOString() : null;
+      const apptMs = iso ? Date.parse(iso) : Number.NaN;
+      return {
+        id: String(r.id),
+        consultantId: String(r.consultant_id),
+        consultantName: this.resolveConsultantDisplayName(
+          r.consultant_names,
+          r.consultant_id
+        ),
+        appointmentDate: iso,
+        status: r.status || null,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+        bucket:
+          Number.isFinite(apptMs) && apptMs >= nowMs && r.status !== 'cancelled'
+            ? 'upcoming'
+            : 'past',
+      };
+    });
+
+    const upcomingAppointments = appointments.filter((a) => a.bucket === 'upcoming');
+    const pastAppointments = appointments.filter((a) => a.bucket === 'past');
+
+    user.insights = {
+      linkedAgents,
+      appointments,
+      upcomingAppointments,
+      pastAppointments,
+      summary: {
+        linkedAgentCount: linkedAgents.length,
+        appointmentCount: appointments.length,
+        upcomingCount: upcomingAppointments.length,
+        pastCount: pastAppointments.length,
+      },
+    };
+
+    return user;
   }
 
   /**
