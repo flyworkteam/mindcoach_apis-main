@@ -148,9 +148,9 @@ class PanelService {
     };
   }
 
-  static async listUsers(page, limit) {
+  static async listUsers(page, limit, search) {
     const { rows, total, page: p, limit: l } =
-      await PanelRepository.findUsersPaginated(page, limit);
+      await PanelRepository.findUsersPaginated(page, limit, search);
 
     return {
       contractVersion: '2',
