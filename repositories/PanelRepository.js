@@ -219,6 +219,40 @@ class PanelRepository {
       return rows;
     }, 2, 'panelFindAgentLinkedUsers');
   }
+
+  static async findUserLinkedAgents(userId, limit = 50) {
+    return executeWithRetry(async () => {
+      const [rows] = await pool.execute(
+        `SELECT c.id, c.names, c.job, c.photo_url,
+                ch.id AS chat_id,
+                ch.created_date AS first_chat_date,
+                ch.last_message_date
+         FROM chats ch
+         INNER JOIN consultants c ON c.id = ch.consultant_id
+         WHERE ch.user_id = ?
+         ORDER BY ch.last_message_date DESC, ch.id DESC
+         LIMIT ?`,
+        [userId, Math.min(limit, 100)]
+      );
+      return rows;
+    }, 2, 'panelFindUserLinkedAgents');
+  }
+
+  static async findUserAppointments(userId, limit = 200) {
+    return executeWithRetry(async () => {
+      const [rows] = await pool.execute(
+        `SELECT a.id, a.user_id, a.consultant_id, a.appointment_date, a.status, a.created_at,
+                c.names AS consultant_names
+         FROM appointments a
+         LEFT JOIN consultants c ON c.id = a.consultant_id
+         WHERE a.user_id = ?
+         ORDER BY a.appointment_date DESC, a.id DESC
+         LIMIT ?`,
+        [userId, Math.min(limit, 500)]
+      );
+      return rows;
+    }, 2, 'panelFindUserAppointments');
+  }
 }
 
 module.exports = PanelRepository;
