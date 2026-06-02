@@ -9,6 +9,62 @@ const fs = require('fs');
 const path = require('path');
 
 class BunnyCDNService {
+  static getCdnPublicBase() {
+    return (
+      process.env.BUNNY_CDN_PUBLIC_BASE ||
+      `https://${process.env.BUNNY_CDN_STORAGE_ZONE || 'mindcoach'}.b-cdn.net`
+    ).replace(/\/$/, '');
+  }
+
+  /**
+   * Sabit storage path'e yükle (üzerine yazar).
+   * @param {Buffer} fileBuffer
+   * @param {string} storagePath — örn. images/c_air.png
+   * @param {string} contentType
+   * @returns {Promise<string>} Public CDN URL
+   */
+  static async uploadToPath(fileBuffer, storagePath, contentType = 'application/octet-stream') {
+    const storageZoneName = process.env.BUNNY_CDN_STORAGE_ZONE || '';
+    const storageZonePassword = process.env.BUNNY_CDN_STORAGE_PASSWORD || '';
+
+    if (!storageZoneName || !storageZonePassword) {
+      throw new Error(
+        'Bunny CDN configuration is missing. Please check environment variables.'
+      );
+    }
+
+    const normalizedPath = String(storagePath || '')
+      .replace(/^\/+/, '')
+      .trim();
+    if (!normalizedPath) {
+      throw new Error('storagePath is required');
+    }
+
+    const uploadUrl = `https://storage.bunnycdn.com/${storageZoneName}/${normalizedPath}`;
+
+    const response = await axios.put(uploadUrl, fileBuffer, {
+      headers: {
+        AccessKey: storageZonePassword,
+        'Content-Type': contentType,
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 300000,
+    });
+
+    if (response.status !== 201 && response.status !== 200) {
+      throw new Error(
+        `Failed to upload file to Bunny CDN. Status: ${response.status}`
+      );
+    }
+
+    const base = this.getCdnPublicBase();
+    return `${base}/${normalizedPath
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/')}`;
+  }
+
   /**
    * Upload file to Bunny CDN
    * @param {Buffer|Stream} fileBuffer - File buffer or stream
