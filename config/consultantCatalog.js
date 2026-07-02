@@ -16,6 +16,8 @@
 
 'use strict';
 
+const { EXPLANATION_TEXTS } = require('./explanationTexts');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Rehberlik alanları (jobs)
 // JobConvert.dart ile birebir uyumlu olmalı.
@@ -185,6 +187,8 @@ const isValidRole = (role) => ROLES.includes(role);
 const isValidExplanation = (job, explanationKey) =>
   isValidJob(job) && EXPLANATIONS_BY_JOB[job].includes(explanationKey);
 
+const explanationText = (key) => EXPLANATION_TEXTS[key] || '';
+
 const getCatalog = () => ({
   jobs: [...JOBS],
   featuresByJob: Object.fromEntries(
@@ -193,6 +197,18 @@ const getCatalog = () => ({
   roles: [...ROLES],
   explanationsByJob: Object.fromEntries(
     Object.entries(EXPLANATIONS_BY_JOB).map(([k, v]) => [k, [...v]])
+  ),
+  // Panelin şablon metnini gösterebilmesi için key → metin eşlemesi
+  explanationTextsByKey: Object.fromEntries(
+    Object.values(EXPLANATIONS_BY_JOB)
+      .flat()
+      .map((key) => [key, explanationText(key)])
+  ),
+  explanationsWithTextByJob: Object.fromEntries(
+    Object.entries(EXPLANATIONS_BY_JOB).map(([job, keys]) => [
+      job,
+      keys.map((key) => ({ key, text: explanationText(key) })),
+    ])
   ),
 });
 
