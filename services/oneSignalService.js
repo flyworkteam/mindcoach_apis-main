@@ -26,16 +26,24 @@ class OneSignalService {
 
       const userIdArray = Array.isArray(userIds) ? userIds : [userIds];
 
+      // Deep-link ve kategori bilgisini üst seviyeye çıkar (client kolay okusun)
+      const deepLink = metadata.deepLink || metadata.deep_link || null;
+      const category = metadata.category || null;
+      const trigger = metadata.trigger || null;
+
       const notification = {
         app_id: appId,
         headings: { en: title },
         contents: { en: subtitle },
         data: {
           type: type,
+          category: category,
+          deepLink: deepLink,
+          trigger: trigger,
           metadata: metadata,
           userIds: userIdArray
         },
- 
+
         include_external_user_ids: userIdArray.map(id => id.toString()),
         sound: 'default',
         priority: 10

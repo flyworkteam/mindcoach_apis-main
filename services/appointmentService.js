@@ -8,6 +8,7 @@ const UserService = require('./userService');
 const ConsultantService = require('./consultantService');
 const OneSignalService = require('./oneSignalService');
 const NotificationRepository = require('../repositories/NotificationRepository');
+const NotificationEngine = require('./notificationEngine');
 
 class AppointmentService {
   /**
@@ -201,6 +202,85 @@ class AppointmentService {
   }
 
   /**
+   * Permanently delete an appointment (hard delete)
+   * @param {number} appointmentId - Appointment ID
+   * @param {number} userId - User ID (must match appointment's userId)
+   * @returns {Promise<Object>} Deleted appointment
+   */
+  static async deleteAppointment(appointmentId, userId) {
+    try {
+      const existing = await AppointmentRepository.findById(appointmentId);
+      if (!existing) {
+        // Zaten silinmiş — idempotent başarı (UI eski liste gösterebilir)
+        return {
+          success: true,
+          appointment: null,
+          message: 'Appointment already deleted',
+        };
+      }
+
+      const appointment = await AppointmentRepository.deleteById(appointmentId, userId);
+
+      sendCancellationNotification(userId, appointment.consultantId, appointment.id).catch(err => {
+        console.error('⚠️ Failed to send deletion notification:', err.message);
+      });
+
+      return {
+        success: true,
+        appointment: appointment.toFlutterFormat(),
+        message: 'Appointment deleted successfully',
+      };
+    } catch (error) {
+      console.error('Error deleting appointment:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reschedule an appointment to a new date/time
+   * @param {number} appointmentId - Appointment ID
+   * @param {number} userId - User ID (must match appointment's userId)
+   * @param {string} appointmentDate - New appointment date (ISO 8601 format)
+   * @returns {Promise<Object>} Rescheduled appointment
+   */
+  static async rescheduleAppointment(appointmentId, userId, appointmentDate) {
+    try {
+      if (!appointmentDate) {
+        throw new Error('Appointment date is required');
+      }
+
+      const date = new Date(appointmentDate);
+      if (isNaN(date.getTime())) {
+        throw new Error('Invalid appointment date format. Expected ISO 8601 format.');
+      }
+
+      const now = new Date();
+      if (date <= now) {
+        throw new Error('Appointment date must be in the future');
+      }
+
+      const isoDate = date.toISOString();
+
+      // Reschedule (repository handles validation/authorization)
+      const appointment = await AppointmentRepository.reschedule(appointmentId, userId, isoDate);
+
+      // Notify the user about the new time (async, don't wait)
+      sendReactivationNotification(userId, appointment.consultantId, appointment.id).catch(err => {
+        console.error('⚠️ Failed to send reschedule notification:', err.message);
+      });
+
+      return {
+        success: true,
+        appointment: appointment.toFlutterFormat(),
+        message: 'Appointment rescheduled successfully'
+      };
+    } catch (error) {
+      console.error('Error rescheduling appointment:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Reactivate cancelled appointment (set status back to 'pending')
    * @param {number} appointmentId - Appointment ID
    * @param {number} userId - User ID (must match appointment's userId)
@@ -241,42 +321,24 @@ async function sendAppointmentNotification(userId, consultantId, title, subtitle
     const consultant = await ConsultantService.getConsultantById(consultantId);
     const consultantPhotoUrl = consultant?.photoURL || null;
 
-    const metadata = {
-      type: 'appointment',
-      appointmentId: appointmentId,
-      consultantId: consultantId,
-      consultantPhotoUrl,
-      timestamp: new Date().toISOString()
-    };
-
-    // Send via OneSignal (if configured)
-    let oneSignalResult = null;
-    try {
-      oneSignalResult = await OneSignalService.sendNotification(
-        userId,
-        title,
-        subtitle,
-        metadata,
-        'system_notification'
-      );
-    } catch (oneSignalError) {
-      console.error('⚠️ OneSignal error (continuing to save to DB):', oneSignalError.message);
-      // Continue even if OneSignal fails
-    }
-
-    // Save to database
-    await NotificationRepository.create({
-      user_id: userId,
+    await NotificationEngine.dispatch(userId, {
+      category: 'system',
       type: 'system_notification',
-      title: title,
-      subtitle: subtitle,
-      metadata: {
-        ...metadata,
-        oneSignalId: oneSignalResult?.oneSignalId || null
-      }
+      trigger: 'appointment',
+      title,
+      subtitle,
+      deepLink: 'appointments',
+    }, {
+      extraMetadata: {
+        type: 'appointment',
+        appointmentId,
+        consultantId,
+        consultantPhotoUrl,
+        timestamp: new Date().toISOString(),
+      },
     });
 
-    console.log(`✅ Appointment notification sent to user ${userId}`);
+    console.log(`✅ Appointment notification dispatched to user ${userId}`);
   } catch (error) {
     console.error('❌ Error sending appointment notification:', error);
     throw error;
@@ -291,44 +353,23 @@ async function sendAppointmentNotification(userId, consultantId, title, subtitle
  */
 async function sendCancellationNotification(userId, consultantId, appointmentId) {
   try {
-    const metadata = {
-      type: 'appointment_cancelled',
-      appointmentId: appointmentId,
-      consultantId: consultantId,
-      timestamp: new Date().toISOString()
-    };
-
-    const title = 'Randevu İptal Edildi';
-    const subtitle = 'Randevunuz iptal edildi';
-
-    // Send via OneSignal (if configured)
-    let oneSignalResult = null;
-    try {
-      oneSignalResult = await OneSignalService.sendNotification(
-        userId,
-        title,
-        subtitle,
-        metadata,
-        'system_notification'
-      );
-    } catch (oneSignalError) {
-      console.error('⚠️ OneSignal error (continuing to save to DB):', oneSignalError.message);
-      // Continue even if OneSignal fails
-    }
-
-    // Save to database
-    await NotificationRepository.create({
-      user_id: userId,
+    await NotificationEngine.dispatch(userId, {
+      category: 'system',
       type: 'system_notification',
-      title: title,
-      subtitle: subtitle,
-      metadata: {
-        ...metadata,
-        oneSignalId: oneSignalResult?.oneSignalId || null
-      }
+      trigger: 'appointment_cancelled',
+      title: 'Randevu İptal Edildi',
+      subtitle: 'Randevunuz iptal edildi',
+      deepLink: 'appointments',
+    }, {
+      extraMetadata: {
+        type: 'appointment_cancelled',
+        appointmentId,
+        consultantId,
+        timestamp: new Date().toISOString(),
+      },
     });
 
-    console.log(`✅ Cancellation notification sent to user ${userId}`);
+    console.log(`✅ Cancellation notification dispatched to user ${userId}`);
   } catch (error) {
     console.error('❌ Error sending cancellation notification:', error);
     throw error;
@@ -343,44 +384,23 @@ async function sendCancellationNotification(userId, consultantId, appointmentId)
  */
 async function sendReactivationNotification(userId, consultantId, appointmentId) {
   try {
-    const metadata = {
-      type: 'appointment_reactivated',
-      appointmentId: appointmentId,
-      consultantId: consultantId,
-      timestamp: new Date().toISOString()
-    };
-
-    const title = 'Randevu Yeniden Aktif';
-    const subtitle = 'Randevunuz tekrar aktif hale getirildi';
-
-    // Send via OneSignal (if configured)
-    let oneSignalResult = null;
-    try {
-      oneSignalResult = await OneSignalService.sendNotification(
-        userId,
-        title,
-        subtitle,
-        metadata,
-        'system_notification'
-      );
-    } catch (oneSignalError) {
-      console.error('⚠️ OneSignal error (continuing to save to DB):', oneSignalError.message);
-      // Continue even if OneSignal fails
-    }
-
-    // Save to database
-    await NotificationRepository.create({
-      user_id: userId,
+    await NotificationEngine.dispatch(userId, {
+      category: 'system',
       type: 'system_notification',
-      title: title,
-      subtitle: subtitle,
-      metadata: {
-        ...metadata,
-        oneSignalId: oneSignalResult?.oneSignalId || null
-      }
+      trigger: 'appointment_reactivated',
+      title: 'Randevu Yeniden Aktif',
+      subtitle: 'Randevunuz tekrar aktif hale getirildi',
+      deepLink: 'appointments',
+    }, {
+      extraMetadata: {
+        type: 'appointment_reactivated',
+        appointmentId,
+        consultantId,
+        timestamp: new Date().toISOString(),
+      },
     });
 
-    console.log(`✅ Reactivation notification sent to user ${userId}`);
+    console.log(`✅ Reactivation notification dispatched to user ${userId}`);
   } catch (error) {
     console.error('❌ Error sending reactivation notification:', error);
     throw error;

@@ -212,6 +212,89 @@ class UserRepository {
   }
 
   /**
+   * Kullanıcının son aktiflik zamanını şimdiye günceller.
+   * Bildirim segmentasyonu (aktif/inaktif) için kullanılır.
+   * @param {number} id - User ID
+   */
+  static async touchLastActive(id) {
+    try {
+      await pool.execute(
+        'UPDATE users SET last_active_at = NOW() WHERE id = ?',
+        [id]
+      );
+    } catch (error) {
+      // last_active_at kolonu yoksa veya geçici hata → sessiz geç (kritik değil)
+      if (error && error.code !== 'ER_BAD_FIELD_ERROR') {
+        console.error('Error touching last_active_at:', error.message);
+      }
+    }
+  }
+
+  /**
+   * Kullanıcının son aktiflik zamanını döner.
+   * @param {number} id - User ID
+   * @returns {Promise<string|null>} ISO tarih veya null
+   */
+  static async getLastActiveAt(id) {
+    try {
+      const [rows] = await pool.execute(
+        'SELECT last_active_at FROM users WHERE id = ? LIMIT 1',
+        [id]
+      );
+      if (rows.length === 0 || !rows[0].last_active_at) return null;
+      return new Date(rows[0].last_active_at).toISOString();
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Son aktifliği "tam olarak X gün önce" olan (o günden beri geri dönmemiş)
+   * kullanıcıların ID'lerini döner. Re-engagement scheduler için.
+   * @param {number} daysAgo
+   * @returns {Promise<number[]>}
+   */
+  static async findUserIdsInactiveExactlyDaysAgo(daysAgo) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT id FROM users
+          WHERE last_active_at IS NOT NULL
+            AND DATE(last_active_at) = DATE(DATE_SUB(NOW(), INTERVAL ? DAY))`,
+        [daysAgo]
+      );
+      return rows.map(r => r.id);
+    } catch (error) {
+      console.error('Error finding inactive users:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Son aktifliği en az X gün önce olan kullanıcı ID'lerini döner (üst sınır opsiyonel).
+   * 30+ gün haftalık re-engagement / 60 günde durdurma mantığı için.
+   * @param {number} minDaysAgo
+   * @param {number|null} maxDaysAgo
+   * @returns {Promise<number[]>}
+   */
+  static async findUserIdsInactiveBetween(minDaysAgo, maxDaysAgo = null) {
+    try {
+      let sql = `SELECT id FROM users
+                  WHERE last_active_at IS NOT NULL
+                    AND last_active_at <= DATE_SUB(NOW(), INTERVAL ? DAY)`;
+      const params = [minDaysAgo];
+      if (maxDaysAgo != null) {
+        sql += ' AND last_active_at >= DATE_SUB(NOW(), INTERVAL ? DAY)';
+        params.push(maxDaysAgo);
+      }
+      const [rows] = await pool.execute(sql, params);
+      return rows.map(r => r.id);
+    } catch (error) {
+      console.error('Error finding inactive users (between):', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Delete user (soft delete - set deleted flag if needed)
    * @param {number} id - User ID
    * @returns {Promise<boolean>} Success status

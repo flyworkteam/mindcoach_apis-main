@@ -15,7 +15,9 @@
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 
-const DEFAULT_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-mini-realtime-preview';
+// GA Realtime API modeli (2026-05-07 itibarıyla preview modeller kapatıldı).
+// Eski: gpt-4o-mini-realtime-preview → Yeni: gpt-realtime-mini
+const DEFAULT_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-mini';
 
 class OpenAIRealtimeSession extends EventEmitter {
   /**
@@ -46,10 +48,13 @@ class OpenAIRealtimeSession extends EventEmitter {
     const url = `wss://api.openai.com/v1/realtime?model=${this.model}`;
     console.log(`[OPENAI-RT] 🔌 Connecting — model=${this.model}`);
 
+    // GA (General Availability) Realtime API: `OpenAI-Beta: realtime=v1`
+    // header KALDIRILMALI. Beta shape 2026-05-12'de kapatıldı; header ya da
+    // eski session alanları gönderilirse oturum `beta_api_shape_disabled`
+    // (code=4000) ile anında kapanır.
     this.ws = new WebSocket(url, {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
-        'OpenAI-Beta': 'realtime=v1',
       },
     });
 
@@ -95,26 +100,39 @@ TONE:
 - This is a real phone call — keep replies natural, warm, conversational and concise.
 - Avoid long monologues; one or two short sentences at a time.`;
 
+    // GA session.update shape. Beta alanları (`modalities`, `input_audio_format`,
+    // `input_audio_transcription`, `temperature`) GA'da REDDEDİLİR ve varsa TÜM
+    // update düşer. GA'da:
+    //   • `session.type: 'realtime'` zorunlu
+    //   • output modaliteleri `output_modalities`
+    //   • ses girişi ayarları `audio.input.*` altında
+    //   • `temperature` kaldırıldı
+    // TTS harici (ElevenLabs) olduğundan yalnızca `text` çıkışı istiyoruz;
+    // `audio.output`/`voice` gerekmiyor.
     this._send({
       type: 'session.update',
       session: {
-        modalities: ['text'],
+        type: 'realtime',
+        output_modalities: ['text'],
         instructions,
-        temperature: this.temperature,
-        input_audio_format: 'pcm16',
-        input_audio_transcription: { model: 'whisper-1' },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.7,
-          prefix_padding_ms: 200,
-          silence_duration_ms: 600,
-          // Critical: we want to verify the transcript is NOT an echo of our
-          // own TTS output before killing the AI response. So we disable
-          // automatic interruption and automatic response creation — the
-          // server layer (voiceChatServerV2) decides manually after it has
-          // seen the full transcript.
-          create_response: false,
-          interrupt_response: false,
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            transcription: { model: 'whisper-1' },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.7,
+              prefix_padding_ms: 200,
+              silence_duration_ms: 600,
+              // Critical: we want to verify the transcript is NOT an echo of our
+              // own TTS output before killing the AI response. So we disable
+              // automatic interruption and automatic response creation — the
+              // server layer (voiceChatServerV2) decides manually after it has
+              // seen the full transcript.
+              create_response: false,
+              interrupt_response: false,
+            },
+          },
         },
       },
     });
@@ -244,12 +262,16 @@ TONE:
   addHistoryMessage(role, text) {
     if (!this.isReady || this.closed) return;
     if (!text || !text.trim()) return;
+    // GA content part tipleri: assistant → `output_text`, user → `input_text`
+    // (beta'da assistant için `text` kullanılıyordu).
     this._send({
       type: 'conversation.item.create',
       item: {
         type: 'message',
         role, // 'user' | 'assistant'
-        content: [{ type: role === 'assistant' ? 'text' : 'input_text', text }],
+        content: [
+          { type: role === 'assistant' ? 'output_text' : 'input_text', text },
+        ],
       },
     });
   }
@@ -257,7 +279,11 @@ TONE:
   /** Force-create a response (e.g. for greeting) */
   createResponse(overrideInstructions = null) {
     if (!this.isReady || this.closed) return;
-    const msg = { type: 'response.create', response: { modalities: ['text'] } };
+    // GA: `modalities` → `output_modalities`.
+    const msg = {
+      type: 'response.create',
+      response: { output_modalities: ['text'] },
+    };
     if (overrideInstructions) msg.response.instructions = overrideInstructions;
     this._send(msg);
   }

@@ -35,7 +35,7 @@ class OpenAIRealtimeClient extends EventEmitter {
    */
   async createSession(options = {}) {
     const {
-      model = 'gpt-4o-realtime-preview-2024-10-01',
+      model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-mini',
       voice = 'alloy',
       temperature = 1.0,
       modalities = ['text'], // We use text only, TTS is handled by ElevenLabs
@@ -53,7 +53,6 @@ class OpenAIRealtimeClient extends EventEmitter {
       const ws = new WebSocket(wsUrl, {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
-          'OpenAI-Beta': 'realtime=v1'
         }
       });
 
@@ -86,23 +85,22 @@ class OpenAIRealtimeClient extends EventEmitter {
       const config = {
         type: 'session.update',
         session: {
-          modalities: modalities,
+          type: 'realtime',
+          output_modalities: modalities,
           instructions: instructions || 'You are a helpful AI assistant.',
-          voice: voice,
-          temperature: temperature,
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-          input_audio_transcription: {
-            model: 'whisper-1'
-            // Language can be specified here if needed: language: language
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              transcription: { model: 'whisper-1' },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 500,
+              },
+            },
           },
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500
-          }
-        }
+        },
       };
       
       // Add language to instructions if provided (as a workaround)
@@ -337,7 +335,8 @@ class OpenAIRealtimeClient extends EventEmitter {
       }
 
       const message = {
-        type: 'response.create'
+        type: 'response.create',
+        response: { output_modalities: ['text'] },
       };
       
       session.send(JSON.stringify(message));

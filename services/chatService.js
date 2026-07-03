@@ -13,8 +13,55 @@ const ElevenLabsService = require('./elevenLabsService');
 const BunnyCDNService = require('./bunnyCDNService');
 const AppointmentService = require('./appointmentService');
 const AIService = require('./aiService');
+const NotificationEngine = require('./notificationEngine');
+const NotificationRepository = require('../repositories/NotificationRepository');
+const NotificationSuppressionRepository = require('../repositories/NotificationSuppressionRepository');
+const { detectCrisis } = require('../utils/crisisDetection');
+
+const CRISIS_SUPPRESSION_MS = 48 * 60 * 60 * 1000; // 48 saat
 
 class ChatService {
+  /**
+   * Kullanıcı mesajında kriz/risk sinyali arar. Tespit halinde kullanıcıyı
+   * 48 saat pazarlama/re-engagement bildirimlerinden muaf tutar ve tek seferlik
+   * nötr, destekleyici bir kaynak bildirimi gönderir (Spec §1 Kriz duyarlılığı).
+   * Fire-and-forget çağrılmalıdır; ana mesaj akışını bloklamaz.
+   */
+  static async _checkCrisisSignal(userId, message, voiceMessageContent) {
+    try {
+      if (!detectCrisis(message, voiceMessageContent)) return;
+      console.warn(`[CRISIS] Risk sinyali tespit edildi user=${userId}; 48s suppression uygulanıyor`);
+      await NotificationSuppressionRepository.suppress(userId, CRISIS_SUPPRESSION_MS, 'crisis');
+
+      // Aynı kullanıcıya 48 saat içinde yalnızca bir kez nötr kaynak bildirimi
+      const already = await NotificationRepository.countByTriggerSince(
+        userId, 'crisis_resource', CRISIS_SUPPRESSION_MS
+      );
+      if (already === 0) {
+        await NotificationEngine.sendTrigger(userId, 'crisis_resource', {}, { skipQuietHours: true });
+      }
+    } catch (err) {
+      console.error('[CRISIS] Kontrol hatası:', err.message);
+    }
+  }
+
+  /**
+   * Terapistten gelen (AI) mesaj için Realtime kategorisinde push bildirimi.
+   * Kullanıcı o an ilgili sohbetteyse client tarafı (OneSignal foreground
+   * listener + current-route) gösterimi bastırır. Gece saatlerinde Realtime
+   * politikası gereği (user_initiated_only) bloklanır.
+   */
+  static async _notifyTherapistMessage(userId, consultant, replyText) {
+    try {
+      if (!userId || !consultant) return;
+      await NotificationEngine.sendTrigger(userId, 'therapist_message', {
+        consultant,
+        messagePreview: replyText,
+      });
+    } catch (e) {
+      console.error('[NOTIF] therapist_message error:', e.message);
+    }
+  }
   /**
    * Get or create chat for user and consultant
    */
@@ -64,6 +111,10 @@ class ChatService {
       console.log(`[CHAT-AI] Text reply saved (${aiReply.length} chars)`);
 
       await this._handleToolCalls(toolCalls, user.id || user.userId, consultantId, chatId);
+
+      // Realtime: terapistten yeni mesaj bildirimi
+      this._notifyTherapistMessage(user.id || user.userId, consultant, aiReply)
+        .catch(() => {});
     } catch (err) {
       console.error('[CHAT-AI] Error generating text reply:', err.message);
     }
@@ -146,6 +197,9 @@ class ChatService {
       }
 
       await this._handleToolCalls(toolCalls, userId, consultantId, chatId);
+
+      // Realtime: terapistten yeni mesaj bildirimi
+      this._notifyTherapistMessage(userId, consultant, aiReply).catch(() => {});
     } catch (err) {
       console.error('[PREMIUM-AI] Error generating premium reply:', err.message);
     }
@@ -233,6 +287,10 @@ class ChatService {
       if (isVoiceMessage) messageType = 'voice';
       else if (isFile) messageType = 'image';
 
+      // Kriz-duyarlılık kontrolü (arka planda, akışı bloklamaz)
+      this._checkCrisisSignal(userId, message, voiceMessageContent)
+        .catch(err => console.error('[CRISIS] background error:', err.message));
+
       this._generateAndSaveTextReply(
         chat.chatId, consultantId, user, chatHistory,
         messageType, message, fileURL, imageContent, voiceMessageContent
@@ -273,6 +331,10 @@ class ChatService {
       let messageType = 'text';
       if (isVoiceMessage) messageType = 'voice';
       else if (isFile) messageType = 'image';
+
+      // Kriz-duyarlılık kontrolü (arka planda, akışı bloklamaz)
+      this._checkCrisisSignal(userId, message, voiceMessageContent)
+        .catch(err => console.error('[CRISIS] background error:', err.message));
 
       this._generatePremiumReply(
         chat.chatId, consultantId, user, chatHistory,

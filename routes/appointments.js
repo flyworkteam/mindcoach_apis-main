@@ -208,6 +208,115 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 /**
+ * @route DELETE /appointments/:id/permanent
+ * @desc Permanently delete an appointment (hard delete, removes row from DB).
+ * Unlike DELETE /:id (which only sets status to 'cancelled'), this is irreversible.
+ * @param {number} id - Appointment ID
+ * @header Authorization: Bearer <token>
+ */
+router.delete('/:id/permanent', authenticate, async (req, res) => {
+  try {
+    const appointmentId = parseInt(req.params.id);
+    const userId = req.userId; // From authentication middleware
+
+    if (isNaN(appointmentId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid appointment ID'
+      });
+    }
+
+    const result = await AppointmentService.deleteAppointment(appointmentId, userId);
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.appointment
+    });
+  } catch (error) {
+    console.error('Error deleting appointment:', error);
+
+    if (error.message === 'Appointment not found') {
+      return res.status(404).json({ success: false, error: error.message });
+    }
+
+    if (error.message === 'Unauthorized: Appointment does not belong to user') {
+      return res.status(403).json({ success: false, error: error.message });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * @route PUT /appointments/:id/reschedule
+ * @desc Reschedule an appointment to a new date/time.
+ * @param {number} id - Appointment ID
+ * @body {string} appointmentDate - New appointment date (ISO 8601 format)
+ * @header Authorization: Bearer <token>
+ */
+router.put('/:id/reschedule', authenticate, async (req, res) => {
+  try {
+    const appointmentId = parseInt(req.params.id);
+    const userId = req.userId; // From authentication middleware
+    const { appointmentDate } = req.body;
+
+    if (isNaN(appointmentId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid appointment ID'
+      });
+    }
+
+    if (!appointmentDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: appointmentDate'
+      });
+    }
+
+    const result = await AppointmentService.rescheduleAppointment(
+      appointmentId,
+      userId,
+      appointmentDate
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.appointment
+    });
+  } catch (error) {
+    console.error('Error rescheduling appointment:', error);
+
+    if (error.message === 'Appointment not found') {
+      return res.status(404).json({ success: false, error: error.message });
+    }
+
+    if (error.message === 'Unauthorized: Appointment does not belong to user') {
+      return res.status(403).json({ success: false, error: error.message });
+    }
+
+    if (
+      error.message === 'Cannot reschedule a completed appointment' ||
+      error.message === 'Appointment date must be in the future' ||
+      error.message === 'Invalid appointment date format. Expected ISO 8601 format.' ||
+      error.message === 'Appointment date is required'
+    ) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
  * @route PUT /appointments/:id/reactivate
  * @desc Reactivate a cancelled appointment (set status back to 'pending')
  * Only cancelled appointments can be reactivated

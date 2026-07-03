@@ -19,13 +19,35 @@ class AuthService {
       throw new Error('GOOGLE_CLIENT_ID is not set in environment variables');
     }
 
+    // Google idToken'ın "aud" claim'i, token'ı isteyen OAuth client'ına göre
+    // değişir (iOS client, Android client, web client farklıdır). Backend tek
+    // bir audience beklerse iOS/Android girişleri "audience mismatch" ile
+    // reddedilir. Bu yüzden platformların tüm client ID'lerini kabul ediyoruz.
+    // İstenirse GOOGLE_ALLOWED_CLIENT_IDS (virgülle ayrılmış) ile genişletilebilir.
+    const allowedAudiences = [
+      process.env.GOOGLE_CLIENT_ID,
+      // iOS — Info.plist GIDClientID
+      '705277804468-1o6rltu0c8voqma3lkvmdda031aq6gf3.apps.googleusercontent.com',
+      // iOS — GoogleService-Info.plist CLIENT_ID
+      '705277804468-0h6o4amg21fn428s15nf1nvb5npk3ct8.apps.googleusercontent.com',
+      // Android — Firebase ANDROID_CLIENT_ID
+      '705277804468-44as6uuepouglaudcgna3j22lu8bvbqr.apps.googleusercontent.com',
+      // Android — Play Store / Upload / Debug imza anahtarları
+      '705277804468-9i3qsghcfocevhbm98vmq9oq0r9a44ol.apps.googleusercontent.com',
+      '705277804468-4fctl8jn0t0f7i5g2sfaql2ldtdssmss.apps.googleusercontent.com',
+      '705277804468-dr9uncu85f72h4crufv38cpk5pr4n660.apps.googleusercontent.com',
+      ...(process.env.GOOGLE_ALLOWED_CLIENT_IDS
+        ? process.env.GOOGLE_ALLOWED_CLIENT_IDS.split(',').map((s) => s.trim())
+        : []),
+    ].filter(Boolean);
+
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
     
     try {
       // Verify the token
       const ticket = await client.verifyIdToken({
         idToken: idToken,
-        audience: process.env.GOOGLE_CLIENT_ID,
+        audience: allowedAudiences,
       });
       
       const payload = ticket.getPayload();

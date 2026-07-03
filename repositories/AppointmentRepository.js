@@ -333,6 +333,77 @@ class AppointmentRepository {
   }
 
   /**
+   * Permanently delete a single appointment (hard delete)
+   * IMPORTANT: This removes the row from the database. Unlike `cancel`, it is NOT reversible.
+   * @param {number} id - Appointment ID
+   * @param {number} userId - User ID (for authorization check)
+   * @returns {Promise<Appointment>} The deleted appointment (as it was before deletion)
+   */
+  static async deleteById(id, userId) {
+    // Doğrulama circuit breaker dışında — "bulunamadı" DB arızası sayılmamalı
+    const appointment = await this.findById(id);
+    if (!appointment) {
+      throw new Error('Appointment not found');
+    }
+    if (appointment.userId !== userId) {
+      throw new Error('Unauthorized: Appointment does not belong to user');
+    }
+
+    await executeWithRetry(async () => {
+      await pool.execute(
+        `DELETE FROM appointments WHERE id = ? AND user_id = ?`,
+        [id, userId]
+      );
+    }, 1, 'delete appointment');
+
+    console.log(`[APPOINTMENT-REPO] 🗑️ Appointment ${id} permanently deleted`);
+    return appointment;
+  }
+
+  /**
+   * Reschedule an appointment to a new date/time.
+   * If the appointment was cancelled, rescheduling reactivates it (status -> 'pending').
+   * @param {number} id - Appointment ID
+   * @param {number} userId - User ID (for authorization check)
+   * @param {string} newDateIso - New appointment date (ISO 8601 format)
+   * @returns {Promise<Appointment>} Updated appointment
+   */
+  static async reschedule(id, userId, newDateIso) {
+    return executeWithRetry(async () => {
+      try {
+        const appointment = await this.findById(id);
+        if (!appointment) {
+          throw new Error('Appointment not found');
+        }
+
+        if (appointment.userId !== userId) {
+          throw new Error('Unauthorized: Appointment does not belong to user');
+        }
+
+        if (appointment.status === 'completed') {
+          throw new Error('Cannot reschedule a completed appointment');
+        }
+
+        await pool.execute(
+          `UPDATE appointments
+           SET appointment_date = ?,
+               status = CASE WHEN status = 'cancelled' THEN 'pending' ELSE status END,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [newDateIso, id]
+        );
+
+        console.log(`[APPOINTMENT-REPO] 🔁 Appointment ${id} rescheduled to ${newDateIso}`);
+
+        return await this.findById(id);
+      } catch (error) {
+        console.error('Error rescheduling appointment:', error);
+        throw error;
+      }
+    }, 3, 'reschedule appointment');
+  }
+
+  /**
    * Find upcoming appointment by user ID (nearest future appointment)
    * @param {number} userId - User ID
    * @returns {Promise<Appointment|null>} Upcoming appointment or null

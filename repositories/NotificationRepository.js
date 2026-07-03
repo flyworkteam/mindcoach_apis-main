@@ -18,17 +18,27 @@ class NotificationRepository {
    */
   static async create(notificationData) {
     try {
-      const { user_id, type, title, subtitle, metadata } = notificationData;
+      const {
+        user_id,
+        type,
+        title,
+        subtitle,
+        metadata,
+        category = 'system',
+        deep_link = null,
+      } = notificationData;
 
       const [result] = await pool.execute(
-        `INSERT INTO notifications (user_id, type, title, subtitle, metadata, sentTime)
-         VALUES (?, ?, ?, ?, ?, NOW())`,
+        `INSERT INTO notifications (user_id, type, category, title, subtitle, deep_link, metadata, sentTime)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           user_id,
           type,
+          category,
           title,
           subtitle,
-          JSON.stringify(metadata)
+          deep_link,
+          JSON.stringify(metadata || {})
         ]
       );
 
@@ -37,6 +47,100 @@ class NotificationRepository {
     } catch (error) {
       console.error('Error creating notification:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Bir kullanıcıya belirli bir kategoride, verilen zaman aralığında kaç bildirim
+   * gönderildiğini sayar (frequency-cap için).
+   * @param {number} userId
+   * @param {string} category
+   * @param {number} sinceMs - şu andan geriye doğru milisaniye penceresi
+   * @returns {Promise<number>}
+   */
+  static async countByCategorySince(userId, category, sinceMs) {
+    try {
+      const sinceDate = new Date(Date.now() - sinceMs);
+      const [rows] = await pool.execute(
+        `SELECT COUNT(*) AS c FROM notifications
+          WHERE user_id = ? AND category = ? AND sentTime >= ?`,
+        [userId, category, sinceDate]
+      );
+      return rows[0].c;
+    } catch (error) {
+      console.error('Error counting notifications by category:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Belirli bir trigger (JSON metadata.trigger) ile verilen pencerede kaç
+   * bildirim gönderildiğini sayar. Aynı içeriğin tekrarını engellemek için.
+   */
+  static async countByTriggerSince(userId, trigger, sinceMs) {
+    try {
+      const sinceDate = new Date(Date.now() - sinceMs);
+      const [rows] = await pool.execute(
+        `SELECT COUNT(*) AS c FROM notifications
+          WHERE user_id = ?
+            AND sentTime >= ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.trigger')) = ?`,
+        [userId, sinceDate, trigger]
+      );
+      return rows[0].c;
+    } catch (error) {
+      console.error('Error counting notifications by trigger:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Bir bildirimi okundu olarak işaretler.
+   */
+  static async markAsRead(id, userId) {
+    try {
+      const [result] = await pool.execute(
+        `UPDATE notifications SET is_read = true, read_at = NOW()
+          WHERE id = ? AND user_id = ?`,
+        [id, userId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Kullanıcının tüm bildirimlerini okundu işaretler.
+   */
+  static async markAllAsRead(userId) {
+    try {
+      const [result] = await pool.execute(
+        `UPDATE notifications SET is_read = true, read_at = NOW()
+          WHERE user_id = ? AND is_read = false`,
+        [userId]
+      );
+      return result.affectedRows;
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Okunmamış bildirim sayısı.
+   */
+  static async countUnread(userId) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = false`,
+        [userId]
+      );
+      return rows[0].c;
+    } catch (error) {
+      console.error('Error counting unread notifications:', error);
+      return 0;
     }
   }
 
@@ -156,13 +260,25 @@ class NotificationRepository {
    * @returns {Object} Notification object
    */
   static mapRowToNotification(row) {
+    let metadata = {};
+    if (row.metadata) {
+      try {
+        metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+      } catch (e) {
+        metadata = {};
+      }
+    }
     return {
       id: row.id,
       userId: row.user_id,
       type: row.type,
+      category: row.category || 'system',
       title: row.title,
       subtitle: row.subtitle,
-      metadata: row.metadata ? JSON.parse(row.metadata) : {},
+      deepLink: row.deep_link || metadata.deepLink || null,
+      metadata,
+      isRead: row.is_read === 1 || row.is_read === true,
+      readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
       sentTime: row.sentTime ? new Date(row.sentTime).toISOString() : null
     };
   }

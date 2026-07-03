@@ -7,6 +7,7 @@ const router = require('express').Router();
 const authenticate = require('../middleware/auth').authenticate;
 const OneSignalService = require('../services/oneSignalService');
 const NotificationRepository = require('../repositories/NotificationRepository');
+const NotificationPreferenceRepository = require('../repositories/NotificationPreferenceRepository');
 const UserService = require('../services/userService');
 
 /**
@@ -184,6 +185,91 @@ router.get('/', authenticate, async (req, res, next) => {
     });
   } catch (error) {
     console.error('Get notifications error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route GET /notifications/preferences
+ * @desc Kullanıcının bildirim tercihlerini (kategori opt-out + sessiz saat) getir
+ * @header Authorization: Bearer <token>
+ */
+router.get('/preferences', authenticate, async (req, res, next) => {
+  try {
+    const prefs = await NotificationPreferenceRepository.getByUserId(req.userId);
+    res.status(200).json({ success: true, data: { preferences: prefs } });
+  } catch (error) {
+    console.error('Get notification preferences error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route PUT /notifications/preferences
+ * @desc Kullanıcının bildirim tercihlerini güncelle
+ * @header Authorization: Bearer <token>
+ * @body { realtime_enabled, therapy_enabled, analysis_enabled, reengagement_enabled,
+ *         subscription_enabled, system_enabled, quiet_hours_enabled,
+ *         quiet_hours_start, quiet_hours_end, timezone }
+ */
+router.put('/preferences', authenticate, async (req, res, next) => {
+  try {
+    const prefs = await NotificationPreferenceRepository.upsert(req.userId, req.body || {});
+    res.status(200).json({ success: true, data: { preferences: prefs } });
+  } catch (error) {
+    console.error('Update notification preferences error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route GET /notifications/unread-count
+ * @desc Okunmamış bildirim sayısı
+ * @header Authorization: Bearer <token>
+ */
+router.get('/unread-count', authenticate, async (req, res, next) => {
+  try {
+    const count = await NotificationRepository.countUnread(req.userId);
+    res.status(200).json({ success: true, data: { unreadCount: count } });
+  } catch (error) {
+    console.error('Unread count error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route POST /notifications/read-all
+ * @desc Tüm bildirimleri okundu işaretle
+ * @header Authorization: Bearer <token>
+ */
+router.post('/read-all', authenticate, async (req, res, next) => {
+  try {
+    const updated = await NotificationRepository.markAllAsRead(req.userId);
+    res.status(200).json({ success: true, data: { updated } });
+  } catch (error) {
+    console.error('Mark all as read error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route PATCH /notifications/:id/read
+ * @desc Tek bir bildirimi okundu işaretle
+ * @header Authorization: Bearer <token>
+ */
+router.patch('/:id/read', authenticate, async (req, res, next) => {
+  try {
+    const notificationId = parseInt(req.params.id);
+    if (isNaN(notificationId)) {
+      return res.status(400).json({ success: false, error: 'Invalid notification ID' });
+    }
+    const ok = await NotificationRepository.markAsRead(notificationId, req.userId);
+    if (!ok) {
+      return res.status(404).json({ success: false, error: 'Notification not found' });
+    }
+    res.status(200).json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('Mark as read error:', error);
     next(error);
   }
 });

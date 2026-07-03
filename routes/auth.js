@@ -8,6 +8,7 @@ const upload = require("../middleware/upload");
 const BunnyCDNService = require("../services/bunnyCDNService");
 const OneSignalService = require("../services/oneSignalService");
 const NotificationRepository = require("../repositories/NotificationRepository");
+const NotificationEngine = require("../services/notificationEngine");
 const AccountDeletionFeedbackRepository = require("../repositories/AccountDeletionFeedbackRepository");
 
 /**
@@ -17,41 +18,9 @@ const AccountDeletionFeedbackRepository = require("../repositories/AccountDeleti
  */
 async function sendWelcomeNotification(userId, username) {
   try {
-    const title = 'Hoş Geldiniz! 👋';
-    const subtitle = `Merhaba ${username}, MindCoach'a hoş geldiniz!`;
-    const metadata = {
-      type: 'welcome',
-      timestamp: new Date().toISOString()
-    };
-
-    // Send via OneSignal (if configured)
-    let oneSignalResult = null;
-    try {
-      oneSignalResult = await OneSignalService.sendNotification(
-        userId,
-        title,
-        subtitle,
-        metadata,
-        'system_notification'
-      );
-    } catch (oneSignalError) {
-      console.error('⚠️ OneSignal error (continuing to save to DB):', oneSignalError.message);
-      // Continue even if OneSignal fails
-    }
-
-    // Save to database
-    await NotificationRepository.create({
-      user_id: userId,
-      type: 'system_notification',
-      title: title,
-      subtitle: subtitle,
-      metadata: {
-        ...metadata,
-        oneSignalId: oneSignalResult?.oneSignalId || null
-      }
-    });
-
-    console.log(`✅ Welcome notification sent to user ${userId}`);
+    // Merkezî bildirim motoru üzerinden gönder (opt-out, sessiz saat vb. kontroller dahil)
+    await NotificationEngine.sendTrigger(userId, 'welcome', { username });
+    console.log(`✅ Welcome notification dispatched to user ${userId}`);
   } catch (error) {
     console.error('❌ Error sending welcome notification:', error);
     throw error;
@@ -255,6 +224,11 @@ router.post("/:provider", validateAuthRequest, async (req, res, next) => {
       });
     }
 
+    // Welcome bildirimi SADECE yeni kullanıcıya gitsin — önce mevcut mu bak
+    const UserRepositoryForWelcome = require('../repositories/UserRepository');
+    const existingUserForWelcome = await UserRepositoryForWelcome.findByCredential(provider, providerData.id);
+    const isNewUser = !existingUserForWelcome;
+
     // Find or create user in database
     const user = await UserService.findOrCreateUser(providerData, provider);
 
@@ -283,10 +257,12 @@ router.post("/:provider", validateAuthRequest, async (req, res, next) => {
     // Log successful authentication
     console.log(`✅ User authenticated: ${user.id} (${provider})`);
 
-    // Send welcome notification (async, don't wait for it)
-    sendWelcomeNotification(user.id, user.username || 'User').catch(err => {
-      console.error('⚠️ Failed to send welcome notification:', err.message);
-    });
+    // Send welcome notification ONLY for new users (async, don't wait for it)
+    if (isNewUser) {
+      sendWelcomeNotification(user.id, user.username || 'User').catch(err => {
+        console.error('⚠️ Failed to send welcome notification:', err.message);
+      });
+    }
 
     res.status(200).json({
       success: true,

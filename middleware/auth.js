@@ -6,6 +6,27 @@
 const jwt = require('jsonwebtoken');
 const UserService = require('../services/userService');
 const TokenRepository = require('../repositories/TokenRepository');
+const UserRepository = require('../repositories/UserRepository');
+
+// Aktiflik güncellemesini throttle et (her istekte DB write yapmamak için)
+const ACTIVITY_THROTTLE_MS = 5 * 60 * 1000; // 5 dakika
+const lastActivityWrite = new Map();
+
+function trackLastActive(userId) {
+  if (!userId) return;
+  const now = Date.now();
+  const prev = lastActivityWrite.get(userId) || 0;
+  if (now - prev < ACTIVITY_THROTTLE_MS) return;
+  lastActivityWrite.set(userId, now);
+  // Fire-and-forget: yanıtı bloklamaz
+  UserRepository.touchLastActive(userId).catch(() => {});
+  // Bellek sızıntısını önlemek için ara sıra temizle
+  if (lastActivityWrite.size > 50000) {
+    for (const [key, ts] of lastActivityWrite) {
+      if (now - ts > ACTIVITY_THROTTLE_MS) lastActivityWrite.delete(key);
+    }
+  }
+}
 
 /**
  * Verify JWT token and attach user to request
@@ -72,7 +93,10 @@ const authenticate = async (req, res, next) => {
     // Attach user to request
     req.user = user;
     req.userId = decoded.userId;
-    
+
+    // Aktiflik takibi (throttled, fire-and-forget)
+    trackLastActive(decoded.userId);
+
     next();
   } catch (error) {
     console.error('Authentication error:', error);
@@ -110,6 +134,7 @@ const optionalAuthenticate = async (req, res, next) => {
         if (user) {
           req.user = user;
           req.userId = decoded.userId;
+          trackLastActive(decoded.userId);
         }
       } catch (error) {
         // Ignore token errors for optional auth

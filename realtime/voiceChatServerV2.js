@@ -894,7 +894,7 @@ class VoiceChatServerV2 {
       return;
     }
 
-    const { userId, consultantId, clientLang } = auth;
+    const { userId, consultantId, clientLang, mode } = auth;
     const connectionId = `${userId}_${consultantId}_${Date.now()}`;
 
     let consultant;
@@ -958,6 +958,7 @@ class VoiceChatServerV2 {
     const ctx = {
       connectionId, userId, consultantId, chatId, user, consultant, ws,
       language: conversationLang,
+      mode,
       personaKey,
       persona,
       gender,
@@ -1018,7 +1019,7 @@ class VoiceChatServerV2 {
 
     // ── Set up OpenAI Realtime session ───────────────────────────────────────
     try {
-      const instructions = await this._buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang);
+      const instructions = await this._buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang, mode);
 
       ctx.openai = new OpenAIRealtimeSession({
         instructions,
@@ -1997,6 +1998,17 @@ class VoiceChatServerV2 {
 
   async _triggerGreeting(ctx) {
     if (ctx.closed) return;
+
+    // Analysis mode: let the LLM open the session itself (self-introduction +
+    // first assessment question) using the assessment instructions, instead of
+    // a generic canned greeting.
+    if (ctx.mode === 'analysis') {
+      try {
+        ctx.openai?.createResponse();
+      } catch (_) { }
+      return;
+    }
+
     const lang = ctx.language || ctx.user?.nativeLang || 'tr';
     const userName = ctx.user?.username || '';
 
@@ -2015,7 +2027,7 @@ class VoiceChatServerV2 {
     this._speakCanned(ctx, greetingText, { endAfter: false, persist: false });
   }
 
-  async _buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang = 'tr') {
+  async _buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang = 'tr', mode = null) {
     // ─── Coach identity ──────────────────────────────────────────────────────
     // Localized name from consultant.names map (e.g. {tr:"...", en:"..."}).
     // Fall back to en, then to the first available value.
@@ -2025,6 +2037,61 @@ class VoiceChatServerV2 {
       names.en ||
       Object.values(names).find((v) => typeof v === 'string') ||
       'Coach';
+
+    // ─── Psychological self-awareness assessment mode ────────────────────────
+    // Launched from the "Analyse" card. The consultant acts as a warm
+    // psychologist who asks exactly 10 questions (one at a time) and then gives
+    // a spoken reflection about the user's emotional state and strengths.
+    // This bypasses the strict single-specialty coaching boundary on purpose.
+    if (mode === 'analysis') {
+      const userName = (user?.username || '').toString().trim();
+      const nameLine = userName ? ` The user's name is ${userName}.` : '';
+      return (
+        `YOU ARE ${coachName}, a warm, empathetic psychologist and emotional ` +
+        `well-being guide inside the MindCoach app.${nameLine}\n\n` +
+        `PURPOSE OF THIS SESSION:\n` +
+        `- This is a short spoken psychological self-awareness check-in during a ` +
+        `video call. It is NOT a clinical diagnosis or medical evaluation.\n` +
+        `- Your goal is to gently understand the user's current emotional state ` +
+        `and personal strengths, then give them an encouraging reflection.\n\n` +
+        `HOW TO RUN THE SESSION (follow strictly):\n` +
+        `1. Open with ONE short, warm sentence: introduce yourself as ` +
+        `${coachName} and say you'll ask a few questions to understand how they ` +
+        `are doing. Keep it brief, then ask your first question.\n` +
+        `2. Ask EXACTLY 10 questions in total, ONE question per turn. After each ` +
+        `question, STOP and wait for the user's spoken answer before asking the ` +
+        `next. Never ask more than one question in a turn. Never list several ` +
+        `questions at once.\n` +
+        `3. Briefly acknowledge each answer (a few empathetic, non-judgmental ` +
+        `words) before the next question.\n` +
+        `4. Across the 10 questions cover a broad range: general mood, stress ` +
+        `and anxiety, sleep and energy, relationships and support, work/study ` +
+        `pressure, self-esteem, motivation, how they cope with difficulty, ` +
+        `recent life changes, and what they feel proud of or good at ` +
+        `(their strengths).\n` +
+        `5. Keep every question short, open-ended and easy to answer out loud. ` +
+        `Use natural spoken language only — no numbering, no lists, no markdown.\n` +
+        `6. After the user answers the 10th question, deliver a final ANALYSIS ` +
+        `(about 4-7 sentences): summarize their overall emotional state, ` +
+        `highlight 2-3 genuine strengths you noticed, and offer 1-2 gentle, ` +
+        `practical suggestions. End on an encouraging note and remind them ` +
+        `warmly that this is a self-awareness reflection, not a medical ` +
+        `diagnosis, and to reach out to a licensed professional for serious ` +
+        `concerns.\n` +
+        `7. Keep count of the questions you have asked so you stop at 10 and ` +
+        `then give the analysis. Do not restart the questionnaire afterwards.\n\n` +
+        `STYLE:\n` +
+        `- Warm, calm, supportive and human. Short spoken sentences.\n` +
+        `- Stay in character as ${coachName}. You are not an AI or a language ` +
+        `model.\n` +
+        `- Do not answer unrelated/off-topic questions; gently steer back to the ` +
+        `check-in.\n\n` +
+        `LANGUAGE:\n` +
+        `- Conduct the ENTIRE session in the user's language ` +
+        `(code: ${conversationLang}). If the user clearly switches language, ` +
+        `follow them.`
+      );
+    }
 
     const job = (consultant?.job || '').toString().trim();
     const explanation = (consultant?.explanation || '').toString().trim();
@@ -2162,7 +2229,13 @@ class VoiceChatServerV2 {
       const rawLang = (url.searchParams.get('lang') || '').toLowerCase().trim();
       const clientLang = /^[a-z]{2}$/.test(rawLang) ? rawLang : null;
 
-      return { success: true, userId: decoded.userId, consultantId: cid, clientLang };
+      // Optional conversation mode. `analysis` → structured psychological
+      // self-awareness assessment (10 questions + spoken summary) instead of
+      // the default specialty coaching flow.
+      const rawMode = (url.searchParams.get('mode') || '').toLowerCase().trim();
+      const mode = rawMode === 'analysis' ? 'analysis' : null;
+
+      return { success: true, userId: decoded.userId, consultantId: cid, clientLang, mode };
     } catch (_) {
       return { success: false, error: 'Auth failed' };
     }

@@ -15,6 +15,7 @@ const VoiceChatServerV2 = require('./realtime/voiceChatServerV2');
 const { generalLimiter, authLimiter, expensiveOperationLimiter, pollingLimiter } = require('./middleware/rateLimiter');
 const { circuitBreakers, circuitBreakerMiddleware, getCircuitBreakerStats } = require('./middleware/circuitBreaker');
 const poolModule = require('./config/database');
+const { ensureNotificationSchema } = require('./config/ensureNotificationSchema');
 require('dotenv').config();
 
 // Initialize database connection
@@ -237,6 +238,18 @@ process.on('SIGINT', () => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Server started PORT: ${PORT}`);
   console.log(`✅ Socket.IO server ready for legacy realtime connections`);
+
+  // Bildirim sistemi şemasını hazırla, ardından zamanlanmış bildirim işlerini başlat
+  ensureNotificationSchema()
+    .then(() => {
+      try {
+        const NotificationScheduler = require('./services/notificationScheduler');
+        NotificationScheduler.start();
+      } catch (err) {
+        console.error('❌ [NOTIF-SCHEDULER] Başlatılamadı:', err.message);
+      }
+    })
+    .catch((err) => console.error('❌ [NOTIF-SCHEMA] Bootstrap hatası:', err.message));
 
   // Sesli sohbet WebSocket sunucusu
   // VOICE_CHAT_VERSION=v2 (varsayılan) → OpenAI Realtime (VAD+STT+LLM) + ElevenLabs WS streaming TTS

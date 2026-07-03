@@ -4,6 +4,8 @@
  * For production-grade API handling millions of requests
  */
 
+const { isBusinessError } = require('../utils/businessErrors');
+
 class CircuitBreaker {
   constructor(name, options = {}) {
     this.name = name;
@@ -66,7 +68,10 @@ class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      // Failure
+      // İş kuralı hataları (404, yetki vb.) circuit breaker'ı tetiklememeli
+      if (isBusinessError(error)) {
+        throw error;
+      }
       this.onFailure();
       if (fallback) {
         console.warn(`⚠️ [CIRCUIT-BREAKER] ${this.name} execution failed, using fallback:`, error.message);

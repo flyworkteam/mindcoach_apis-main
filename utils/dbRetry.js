@@ -6,6 +6,7 @@
 
 const pool = require('../config/database');
 const { circuitBreakers } = require('../middleware/circuitBreaker');
+const { isBusinessError } = require('./businessErrors');
 
 /**
  * Execute a database query with retry mechanism and circuit breaker protection
@@ -23,6 +24,11 @@ async function executeWithRetry(queryFn, retries = 2, operationName = 'Database 
       try {
         return await queryFn();
       } catch (error) {
+        // İş kuralı hataları retry edilmez
+        if (isBusinessError(error)) {
+          throw error;
+        }
+
         // Retry on connection errors
         const isRetryableError = 
           error.code === 'ECONNRESET' ||
