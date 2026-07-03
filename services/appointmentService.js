@@ -9,6 +9,7 @@ const ConsultantService = require('./consultantService');
 const OneSignalService = require('./oneSignalService');
 const NotificationRepository = require('../repositories/NotificationRepository');
 const NotificationEngine = require('./notificationEngine');
+const { parseAbsoluteAppointmentDate } = require('../utils/appointmentDateUtils');
 
 class AppointmentService {
   /**
@@ -37,11 +38,8 @@ class AppointmentService {
         throw new Error('Appointment date is required');
       }
 
-      // Validate date format (ISO 8601)
-      let date = new Date(appointmentDate);
-      if (isNaN(date.getTime())) {
-        throw new Error('Invalid appointment date format. Expected ISO 8601 format.');
-      }
+      // Validate date format (ISO 8601, absolute instant — Flutter sends toUtc().toISOString())
+      let date = parseAbsoluteAppointmentDate(appointmentDate);
 
       // Validate appointment date: only rule is "must be in the future".
       // Saat aralığı kısıtlaması yok — client zaten 00:00-23:30 arası geçerli
@@ -249,10 +247,7 @@ class AppointmentService {
         throw new Error('Appointment date is required');
       }
 
-      const date = new Date(appointmentDate);
-      if (isNaN(date.getTime())) {
-        throw new Error('Invalid appointment date format. Expected ISO 8601 format.');
-      }
+      const date = parseAbsoluteAppointmentDate(appointmentDate);
 
       const now = new Date();
       if (date <= now) {

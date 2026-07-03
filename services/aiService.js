@@ -27,7 +27,10 @@ const APPOINTMENT_TOOL = {
       properties: {
         appointmentDate: {
           type: 'string',
-          description: 'ISO 8601 date-time for the appointment (e.g. 2026-05-13T10:00:00.000Z)',
+          description:
+            'Appointment date-time in Turkey local wall clock. ' +
+            'Use the exact hour the user requested (e.g. user says 13:00 → 2026-07-04T13:00:00+03:00). ' +
+            'Do NOT append Z unless the time is truly UTC. Prefer +03:00 offset.',
         },
         urgency: {
           type: 'string',

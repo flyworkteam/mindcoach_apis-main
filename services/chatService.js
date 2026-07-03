@@ -17,6 +17,7 @@ const NotificationEngine = require('./notificationEngine');
 const NotificationRepository = require('../repositories/NotificationRepository');
 const NotificationSuppressionRepository = require('../repositories/NotificationSuppressionRepository');
 const { detectCrisis } = require('../utils/crisisDetection');
+const { parseAIAppointmentDate } = require('../utils/appointmentDateUtils');
 
 const CRISIS_SUPPRESSION_MS = 48 * 60 * 60 * 1000; // 48 saat
 
@@ -499,12 +500,13 @@ class ChatService {
       if (tc.name === 'create_appointment') {
         try {
           const { appointmentDate, urgency } = tc.args;
-          console.log(`[APPOINTMENT-AI] Creating appointment: userId=${userId}, consultantId=${consultantId}, date=${appointmentDate}, urgency=${urgency}`);
+          const normalizedDate = parseAIAppointmentDate(appointmentDate).toISOString();
+          console.log(`[APPOINTMENT-AI] Creating appointment: userId=${userId}, consultantId=${consultantId}, raw=${appointmentDate}, normalized=${normalizedDate}, urgency=${urgency}`);
 
           const result = await AppointmentService.createAppointmentFromWebhook(
             userId,
             consultantId,
-            appointmentDate
+            normalizedDate
           );
 
           console.log(`[APPOINTMENT-AI] Appointment created: id=${result.appointment?.id}`);
