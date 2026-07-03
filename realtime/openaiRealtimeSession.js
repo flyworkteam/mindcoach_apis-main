@@ -14,10 +14,7 @@
 
 const WebSocket = require('ws');
 const EventEmitter = require('events');
-
-// GA Realtime API modeli (2026-05-07 itibarıyla preview modeller kapatıldı).
-// Eski: gpt-4o-mini-realtime-preview → Yeni: gpt-realtime-mini
-const DEFAULT_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-mini';
+const { resolveRealtimeModel } = require('./realtimeModel');
 
 class OpenAIRealtimeSession extends EventEmitter {
   /**
@@ -35,7 +32,7 @@ class OpenAIRealtimeSession extends EventEmitter {
     this.instructions = opts.instructions || 'You are a helpful AI assistant.';
     this.language = opts.language || 'tr';
     this.temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.8;
-    this.model = opts.model || DEFAULT_MODEL;
+    this.model = resolveRealtimeModel(opts.model);
 
     this.ws = null;
     this.isReady = false;

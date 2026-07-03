@@ -10,6 +10,7 @@
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 const axios = require('axios');
+const { resolveRealtimeModel } = require('./realtimeModel');
 
 class OpenAIRealtimeClient extends EventEmitter {
   constructor() {
@@ -34,8 +35,8 @@ class OpenAIRealtimeClient extends EventEmitter {
    * @returns {Promise<Object>} Session object with WebSocket connection
    */
   async createSession(options = {}) {
+    const model = resolveRealtimeModel(options.model);
     const {
-      model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-mini',
       voice = 'alloy',
       temperature = 1.0,
       modalities = ['text'], // We use text only, TTS is handled by ElevenLabs
