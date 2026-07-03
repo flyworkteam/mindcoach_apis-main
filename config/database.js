@@ -12,8 +12,12 @@ require('dotenv').config();
 const poolConfig = {
   connectionLimit: parseInt(process.env.DB_POOL_LIMIT) || 100, // Reduced from 300 for PM2 stability
   queueLimit: parseInt(process.env.DB_QUEUE_LIMIT) || 500, // Reduced from 1000 for better responsiveness
-  connectTimeout: 5000, // 5 seconds - faster initial connection timeout
-  idleTimeout: 300000, // 5 minutes - balance between reuse and resource cleanup
+  connectTimeout: 10000, // 10 sn — uzak DB'de ilk bağlantı için daha toleranslı
+  // Uzak MySQL'in wait_timeout'undan (genelde 60-120 sn) ÖNCE bağlantıyı geri
+  // dönüştürerek "PROTOCOL_CONNECTION_LOST" hatalarını önle. Bayat bağlantı
+  // yeniden kullanılmadan kapanır.
+  idleTimeout: parseInt(process.env.DB_IDLE_TIMEOUT) || 30000, // 30 sn
+  maxIdle: parseInt(process.env.DB_MAX_IDLE) || 20, // boşta tutulacak azami bağlantı
 };
 
 const pool = mysql.createPool({
@@ -33,8 +37,9 @@ const pool = mysql.createPool({
   keepAliveInitialDelay: 0,
   // Connection options (passed to each connection)
   connectTimeout: poolConfig.connectTimeout,
-  // Keep connections alive longer for better reuse
+  // Bayat bağlantıları uzak sunucu kapatmadan önce geri dönüştür
   idleTimeout: poolConfig.idleTimeout,
+  maxIdle: poolConfig.maxIdle,
   // Multiple statement support disabled for security
   multipleStatements: false,
   // Enable compression for better performance

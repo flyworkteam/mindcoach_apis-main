@@ -5,6 +5,7 @@
 
 const pool = require('../config/database');
 const Consultant = require('../models/Consultant');
+const { executeWithRetry } = require('../utils/dbRetry');
 
 class ConsultantRepository {
   static _parseRoles(rawRoles) {
@@ -55,11 +56,17 @@ class ConsultantRepository {
       const offset = options.offset || 0;
       const orderBy = options.orderBy || 'created_at DESC';
 
-      const [rows] = await pool.execute(
-        `SELECT * FROM consultants 
-         ORDER BY ${orderBy}
-         LIMIT ? OFFSET ?`,
-        [limit, offset]
+      // Bağlantı kopmalarında (PROTOCOL_CONNECTION_LOST) otomatik yeniden dene —
+      // danışman listesi uygulamanın ilk açılış ekranı, boş dönmemeli.
+      const [rows] = await executeWithRetry(
+        () => pool.execute(
+          `SELECT * FROM consultants 
+           ORDER BY ${orderBy}
+           LIMIT ? OFFSET ?`,
+          [limit, offset]
+        ),
+        3,
+        'ConsultantRepository.findAll'
       );
 
       return rows.map(row => this.mapRowToConsultant(row));
@@ -76,9 +83,13 @@ class ConsultantRepository {
    */
   static async findById(id) {
     try {
-      const [rows] = await pool.execute(
-        'SELECT * FROM consultants WHERE id = ? LIMIT 1',
-        [id]
+      const [rows] = await executeWithRetry(
+        () => pool.execute(
+          'SELECT * FROM consultants WHERE id = ? LIMIT 1',
+          [id]
+        ),
+        3,
+        'ConsultantRepository.findById'
       );
 
       if (rows.length === 0) {
