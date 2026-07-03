@@ -104,6 +104,46 @@ router.post('/confirm-purchase', async (req, res, next) => {
 });
 
 /**
+ * @route POST /api/v1/premium/revenuecat-webhook
+ * @desc RevenueCat abonelik yaşam döngüsü webhook'u (server-to-server).
+ *       RevenueCat panelinde tanımlanan Authorization header ile doğrulanır.
+ *       Satın alma, yenileme, deneme→ücretli geçiş, iptal, süre dolumu ve
+ *       faturalama sorunlarını backend ile senkron tutar.
+ * @header Authorization: <REVENUECAT_WEBHOOK_AUTH>
+ * @body {Object} RevenueCat event payload ({ event: {...}, api_version })
+ */
+router.post('/revenuecat-webhook', async (req, res) => {
+  try {
+    const expected = process.env.REVENUECAT_WEBHOOK_AUTH;
+
+    // Güvenlik: RC panelinde bir Authorization header tanımlanmışsa doğrula.
+    // Tanımlı değilse (env yok) endpoint'i açık bırakmayıp reddet — yanlış
+    // yapılandırmayı sessizce kabul etmemek için.
+    if (!expected) {
+      console.error('[RC-WEBHOOK] REVENUECAT_WEBHOOK_AUTH tanımlı değil; istek reddedildi.');
+      return res.status(503).json({ success: false, error: 'Webhook not configured' });
+    }
+
+    const provided = req.headers['authorization'];
+    if (provided !== expected) {
+      console.warn('[RC-WEBHOOK] Geçersiz Authorization header; istek reddedildi.');
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const event = req.body && req.body.event ? req.body.event : req.body;
+    const result = await PremiumService.applyRevenueCatEvent(event);
+
+    // RC, 2xx dışı yanıtlarda yeniden dener. İşleyemesek bile (ör. anonim ID)
+    // 200 dönüp gereksiz retry'ı önlüyoruz; sorunlar loglanıyor.
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error('❌ RevenueCat webhook error:', error);
+    // Geçici hata → RC retry yapsın diye 500 dön.
+    return res.status(500).json({ success: false, error: 'Webhook processing failed' });
+  }
+});
+
+/**
  * @route GET /api/v1/premium/status
  * @desc Get authenticated user's premium devices
  * @header Authorization: Bearer <token>

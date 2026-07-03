@@ -192,6 +192,77 @@ class PremiumDeviceRepository {
   }
 
   /**
+   * RevenueCat webhook'undan gelen abonelik durumunu userId bazında uygular.
+   *
+   * Webhook cihaz ID'si göndermez; yalnızca RevenueCat app_user_id (bizim
+   * userId) bilinir. Kullanıcının tüm cihaz satırları güncellenir. Hiç satır
+   * yoksa, webhook'un yetkili (source-of-truth) kalması için sentetik bir satır
+   * (device_id = `rc_user_<userId>`) oluşturulur.
+   *
+   * @param {number} userId
+   * @param {Object} data - { isPremium, expiryDate, purchasedDate, planId, isTrial }
+   * @returns {Promise<number>} Etkilenen/oluşturulan satır sayısı
+   */
+  static async applyStatusByUserId(userId, data) {
+    return executeWithRetry(async () => {
+      const {
+        isPremium,
+        expiryDate = null,
+        purchasedDate = null,
+        planId = 'pro',
+        isTrial = false,
+      } = data;
+
+      const now = new Date().toISOString();
+
+      const [result] = await pool.execute(
+        `UPDATE premium_devices
+         SET is_premium = ?,
+             expiry_date = ?,
+             purchased_date = COALESCE(?, purchased_date),
+             plan_id = ?,
+             is_trial = ?,
+             updated_at = ?
+         WHERE user_id = ?`,
+        [isPremium, expiryDate, purchasedDate, planId, isTrial, now, userId]
+      );
+
+      if (result.affectedRows > 0) {
+        return result.affectedRows;
+      }
+
+      // Kullanıcının hiç cihaz satırı yok → sentetik satır oluştur.
+      const syntheticDeviceId = `rc_user_${userId}`;
+      await pool.execute(
+        `INSERT INTO premium_devices
+         (device_id, user_id, is_premium, expiry_date, purchased_date,
+          plan_id, receipt_data, package_identifier, is_trial, trial_start_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           is_premium = VALUES(is_premium),
+           expiry_date = VALUES(expiry_date),
+           purchased_date = COALESCE(VALUES(purchased_date), purchased_date),
+           plan_id = VALUES(plan_id),
+           is_trial = VALUES(is_trial),
+           updated_at = VALUES(updated_at)`,
+        [
+          syntheticDeviceId,
+          userId,
+          isPremium,
+          expiryDate,
+          purchasedDate,
+          planId,
+          isTrial,
+          isTrial ? now : null,
+          now,
+          now,
+        ]
+      );
+      return 1;
+    }, 2, 'applyStatusByUserId');
+  }
+
+  /**
    * Check if device has active premium
    * @param {string} deviceId - Device ID
    * @returns {Promise<boolean>}
