@@ -115,6 +115,49 @@ class ChatRepository {
   }
 
   /**
+   * Son mesajı tam olarak [hoursAgo] saat önce olan sohbetler (±windowHours).
+   * coach_idle_24h için saatlik kontrol.
+   */
+  static async findChatsWithLastMessageHoursAgo(hoursAgo, windowHours = 1) {
+    try {
+      const minH = Math.max(0, hoursAgo - windowHours);
+      const maxH = hoursAgo + windowHours;
+      const [rows] = await pool.execute(
+        `SELECT id, user_id, consultant_id, last_message_date
+           FROM chats
+          WHERE last_message_date IS NOT NULL
+            AND last_message_date <= DATE_SUB(NOW(), INTERVAL ? HOUR)
+            AND last_message_date > DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+        [minH, maxH]
+      );
+      return rows;
+    } catch (error) {
+      console.error('Error finding chats idle hours ago:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Son mesajı tam olarak X gün önce olan sohbetler.
+   * coach_idle_3d için günlük kontrol.
+   */
+  static async findChatsWithLastMessageDaysAgo(daysAgo) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT id, user_id, consultant_id, last_message_date
+           FROM chats
+          WHERE last_message_date IS NOT NULL
+            AND DATE(last_message_date) = DATE(DATE_SUB(NOW(), INTERVAL ? DAY))`,
+        [daysAgo]
+      );
+      return rows;
+    } catch (error) {
+      console.error('Error finding chats idle days ago:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Update chat last message
    * @param {number} chatId - Chat ID
    * @param {string} lastMessage - Last message text

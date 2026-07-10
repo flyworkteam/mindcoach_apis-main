@@ -7,7 +7,9 @@
  * İşler:
  *   - Randevu hatırlatma (her 5 dk): seansına ~15 dk kalan kullanıcılar
  *   - Günlük işler (yerel saat NOTIF_DAILY_HOUR, vars. 10:00):
- *       • Re-engagement (3/7/14/30 gün + 30+ haftalık, 60+ durur)
+ *       • Hocayla 3 gün konuşulmama (coach_idle_3d)
+ *       • Re-engagement (3/7/10/14/30 gün + 30+ haftalık, 60+ durur)
+ *   - Saatlik: Hocayla 24 saat konuşulmama (coach_idle_24h)
  *       • Abonelik/deneme bitiş hatırlatmaları
  *       • Analiz-testi teşviki (opsiyonel, env ile açılır)
  *       • Suppression/event tablosu temizliği
@@ -24,6 +26,7 @@ const NotificationSuppressionRepository = require('../repositories/NotificationS
 const UserRepository = require('../repositories/UserRepository');
 const ChatRepository = require('../repositories/ChatRepository');
 const ConsultantRepository = require('../repositories/ConsultantRepository');
+const { normalizeLang } = require('../config/notificationI18n');
 
 const TZ = process.env.NOTIF_TIMEZONE || 'Europe/Istanbul';
 const DAILY_HOUR = parseInt(process.env.NOTIF_DAILY_HOUR, 10) || 10;
@@ -40,6 +43,11 @@ class NotificationScheduler {
       this.runAppointmentReminders().catch(e => console.error('[SCHED] appt error:', e.message));
     }, 5 * 60 * 1000);
 
+    // Hocayla 24s konuşulmama: saatlik
+    this._coachIdleTimer = setInterval(() => {
+      this.runCoachIdle24h().catch(e => console.error('[SCHED] coach_idle_24h error:', e.message));
+    }, 60 * 60 * 1000);
+
     // Günlük işler için dakikalık tetik kontrolü
     this._dailyTimer = setInterval(() => {
       this._maybeRunDaily().catch(e => console.error('[SCHED] daily error:', e.message));
@@ -50,6 +58,7 @@ class NotificationScheduler {
 
   static stop() {
     if (this._apptTimer) clearInterval(this._apptTimer);
+    if (this._coachIdleTimer) clearInterval(this._coachIdleTimer);
     if (this._dailyTimer) clearInterval(this._dailyTimer);
     this._started = false;
   }
@@ -80,6 +89,7 @@ class NotificationScheduler {
   }
 
   static async runDailyJobs(dateKey) {
+    await this.runCoachIdle3d(dateKey).catch(e => console.error('[SCHED] coach_idle_3d:', e.message));
     await this.runReengagement(dateKey).catch(e => console.error('[SCHED] reengage:', e.message));
     await this.runSubscriptionReminders(dateKey).catch(e => console.error('[SCHED] subscription:', e.message));
     if (ANALYSIS_LAUNCH_ENABLED) {
@@ -93,15 +103,15 @@ class NotificationScheduler {
   // ------------------------------------------------------------------
   static async runReengagement(dateKey) {
     // Kademeli: 3 / 7 / 14 / 30 gün
-    const stageMap = { 3: 'reengage_3d', 7: 'reengage_7d', 14: 'reengage_14d', 30: 'reengage_30d' };
+    const stageMap = { 3: 'reengage_3d', 7: 'reengage_7d', 10: 'reengage_10d', 14: 'reengage_14d', 30: 'reengage_30d' };
     for (const [daysStr, trigger] of Object.entries(stageMap)) {
       const days = parseInt(daysStr, 10);
       const userIds = await UserRepository.findUserIdsInactiveExactlyDaysAgo(days);
       for (const uid of userIds) {
         const claimed = await NotificationEventRepository.claim(uid, `${trigger}:${dateKey}`);
         if (!claimed) continue;
-        let params = {};
-        if (trigger === 'reengage_3d') {
+        let params = { lang: await this._userLang(uid) };
+        if (trigger === 'reengage_3d' || trigger === 'reengage_7d') {
           params.consultant = await this._lastConsultantForUser(uid);
         }
         await NotificationEngine.sendTrigger(uid, trigger, params, { isUserActive: false });
@@ -119,6 +129,15 @@ class NotificationScheduler {
     }
   }
 
+  static async _userLang(userId) {
+    try {
+      const user = await UserRepository.findById(userId);
+      return normalizeLang(user?.nativeLang);
+    } catch (e) {
+      return 'en';
+    }
+  }
+
   static async _lastConsultantForUser(userId) {
     try {
       const chats = await ChatRepository.findByUserId(userId, { limit: 1, offset: 0 });
@@ -128,6 +147,42 @@ class NotificationScheduler {
       return await ConsultantRepository.findById(consultantId);
     } catch (e) {
       return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Hocayla konuşulmama (chats.last_message_date)
+  // ------------------------------------------------------------------
+  static async runCoachIdle24h() {
+    const chats = await ChatRepository.findChatsWithLastMessageHoursAgo(24, 1);
+    const hourKey = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+    for (const row of chats) {
+      const eventKey = `coach_idle_24h:${row.id}:${hourKey}`;
+      const claimed = await NotificationEventRepository.claim(row.user_id, eventKey);
+      if (!claimed) continue;
+      let consultant = null;
+      try {
+        consultant = await ConsultantRepository.findById(row.consultant_id);
+      } catch (e) { /* optional */ }
+      const lang = await this._userLang(row.user_id);
+      await NotificationEngine.sendTrigger(row.user_id, 'coach_idle_24h', { consultant, lang }, {});
+    }
+  }
+
+  static async runCoachIdle3d(dateKey) {
+    const chats = await ChatRepository.findChatsWithLastMessageDaysAgo(3);
+    for (const row of chats) {
+      const claimed = await NotificationEventRepository.claim(
+        row.user_id,
+        `coach_idle_3d:${row.id}:${dateKey}`
+      );
+      if (!claimed) continue;
+      let consultant = null;
+      try {
+        consultant = await ConsultantRepository.findById(row.consultant_id);
+      } catch (e) { /* optional */ }
+      const lang = await this._userLang(row.user_id);
+      await NotificationEngine.sendTrigger(row.user_id, 'coach_idle_3d', { consultant, lang }, {});
     }
   }
 

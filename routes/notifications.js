@@ -8,6 +8,7 @@ const authenticate = require('../middleware/auth').authenticate;
 const OneSignalService = require('../services/oneSignalService');
 const NotificationRepository = require('../repositories/NotificationRepository');
 const NotificationPreferenceRepository = require('../repositories/NotificationPreferenceRepository');
+const NotificationTestService = require('../services/notificationTestService');
 const UserService = require('../services/userService');
 
 /**
@@ -157,6 +158,33 @@ router.post('/broadcast', authenticate, async (req, res, next) => {
     });
   } catch (error) {
     console.error('Notification broadcast error:', error);
+    next(error);
+  }
+});
+
+/**
+ * @route POST /notifications/test-sequence
+ * @desc GEÇİCİ: Tüm yeni bildirim tiplerini sırayla gönderir (test için).
+ *       NOTIF_TEST_SEQUENCE=false ile kapatılır.
+ * @header Authorization: Bearer <token>
+ */
+router.post('/test-sequence', authenticate, async (req, res, next) => {
+  try {
+    if (!NotificationTestService.isEnabled()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Notification test sequence is disabled (NOTIF_TEST_SEQUENCE=false)',
+      });
+    }
+    const clientLang = req.body?.lang;
+    const result = await NotificationTestService.runSequenceForUser(req.userId, clientLang);
+    res.status(202).json({
+      success: true,
+      data: result,
+      message: 'Test notification sequence started',
+    });
+  } catch (error) {
+    console.error('Notification test sequence error:', error);
     next(error);
   }
 });

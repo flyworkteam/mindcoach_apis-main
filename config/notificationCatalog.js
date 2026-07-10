@@ -12,6 +12,8 @@
 
 'use strict';
 
+const { getLocalizedTexts, defaultCoachName, normalizeLang } = require('./notificationI18n');
+
 // --- Kategoriler --------------------------------------------------------------
 const CATEGORY = {
   REALTIME: 'realtime',
@@ -102,10 +104,11 @@ const NON_OPTOUTABLE_TRIGGERS = new Set([
 /**
  * Terapist adını çok dilli JSON'dan güvenli çeker.
  */
-function consultantName(consultant) {
-  if (!consultant) return 'Koçun';
+function consultantName(consultant, lang = 'en') {
+  if (!consultant) return defaultCoachName(lang);
+  const l = normalizeLang(lang);
   const n = consultant.names || {};
-  return n.tr || n.en || n.de || 'Koçun';
+  return n[l] || n.en || n.tr || n.de || defaultCoachName(l);
 }
 
 function previewText(text, max = 40) {
@@ -167,14 +170,43 @@ const TEMPLATES = {
     subtitle: '25 farklı terapistten sana uygun olanı seç, başlamaya hazır ol',
     deepLink: 'therapists/browse',
   }),
-  continue_therapy: ({ consultant }) => ({
-    category: CATEGORY.THERAPY,
-    type: 'therapy_continue',
-    trigger: 'continue_therapy',
-    title: consultantName(consultant),
-    subtitle: `${consultantName(consultant)} ile kaldığın yerden devam etmek ister misin?`,
-    deepLink: `chat/${consultant?.id}`,
-  }),
+  continue_therapy: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    return {
+      category: CATEGORY.THERAPY,
+      type: 'therapy_continue',
+      trigger: 'continue_therapy',
+      title: name,
+      subtitle: getLocalizedTexts('coach_idle_24h', lang, { name }).subtitle,
+      deepLink: consultant?.id ? `chat/${consultant.id}` : 'therapists/browse',
+    };
+  },
+  /** Hocayla 24 saat konuşulmadı */
+  coach_idle_24h: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('coach_idle_24h', lang, { name });
+    return {
+      category: CATEGORY.THERAPY,
+      type: 'therapy_continue',
+      trigger: 'coach_idle_24h',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
+    };
+  },
+  /** Hocayla 3 gün konuşulmadı */
+  coach_idle_3d: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('coach_idle_3d', lang, { name });
+    return {
+      category: CATEGORY.THERAPY,
+      type: 'therapy_continue',
+      trigger: 'coach_idle_3d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
+    };
+  },
   new_category: ({ categoryName, categoryId }) => ({
     category: CATEGORY.THERAPY,
     type: 'therapy_new_category',
@@ -227,14 +259,30 @@ const TEMPLATES = {
     subtitle: `Nasılsın? ${consultantName(consultant)} seninle konuşmaya hazır`,
     deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
   }),
-  reengage_7d: () => ({
-    category: CATEGORY.REENGAGEMENT,
-    type: 'reengagement',
-    trigger: 'reengage_7d',
-    title: 'Buradayız',
-    subtitle: 'Kendine biraz zaman ayırmak istersen buradayız',
-    deepLink: 'home',
-  }),
+  reengage_7d: ({ consultant, lang = 'en' }) => {
+    const texts = getLocalizedTexts('app_idle_7d', lang, {
+      name: consultantName(consultant, lang),
+    });
+    return {
+      category: CATEGORY.REENGAGEMENT,
+      type: 'reengagement',
+      trigger: 'reengage_7d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
+    };
+  },
+  reengage_10d: ({ lang = 'en' }) => {
+    const texts = getLocalizedTexts('app_idle_10d', lang, {});
+    return {
+      category: CATEGORY.REENGAGEMENT,
+      type: 'reengagement',
+      trigger: 'reengage_10d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'home',
+    };
+  },
   reengage_14d: () => ({
     category: CATEGORY.REENGAGEMENT,
     type: 'reengagement',
