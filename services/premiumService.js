@@ -294,7 +294,13 @@ class PremiumService {
         const userPremium = await PremiumDeviceRepository.findActivePremiumByUserId(userId);
         if (userPremium) {
           if (userPremium.isExpired()) {
-            await PremiumDeviceRepository.deactivatePremium(userPremium.deviceId);
+            if (userPremium.deviceId) {
+              await PremiumDeviceRepository.deactivatePremium(userPremium.deviceId);
+            } else {
+              console.warn(
+                `[PremiumService] Expired premium for userId=${userId} has no deviceId; skipped deactivate`,
+              );
+            }
           } else {
             return {
               success: true,

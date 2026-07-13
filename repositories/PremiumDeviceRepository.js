@@ -309,6 +309,10 @@ class PremiumDeviceRepository {
    * @returns {Promise<boolean>}
    */
   static async deactivatePremium(deviceId) {
+    if (!deviceId) {
+      console.warn('[PremiumDeviceRepository] deactivatePremium skipped: deviceId missing');
+      return false;
+    }
     return executeWithRetry(async () => {
       const now = new Date().toISOString();
       const [result] = await pool.execute(

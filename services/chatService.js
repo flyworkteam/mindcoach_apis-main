@@ -557,7 +557,11 @@ class ChatService {
         return false;
       }
 
-      // Delete chat (messages will be deleted automatically via CASCADE)
+      // Explicitly delete messages first (safe even if FK CASCADE is missing)
+      if (chat.id) {
+        await MessageRepository.deleteByChatId(chat.id);
+      }
+
       return await ChatRepository.deleteByUserAndConsultant(userId, consultantId);
     } catch (error) {
       console.error('Error deleting chat:', error);

@@ -1,18 +1,28 @@
+/**
+ * PremiumDevice model
+ * MySQL satırları snake_case gelir; API/servis camelCase kullanır.
+ * Her iki format da desteklenir.
+ */
 class PremiumDevice {
-  constructor(data) {
-    this.id = data.id || null; // Database ID
-    this.deviceId = data.deviceId; // Unique device ID from app
-    this.userId = data.userId || null; // User who purchased premium
-    this.isPremium = data.isPremium ?? false;
-    this.expiryDate = data.expiryDate || null; // ISO 8601 timestamp
-    this.purchasedDate = data.purchasedDate || null; // When premium was bought
-    this.planId = data.planId || 'pro'; // pro, plus, etc.
-    this.receiptData = data.receiptData || null; // RevenueCat receipt for verification
-    this.packageIdentifier = data.packageIdentifier || null; // com.example.app.premium
-    this.isTrial = data.isTrial ?? false; // Is this a trial or purchased?
-    this.trialStartDate = data.trialStartDate || null; // When 3-day trial started
-    this.createdAt = data.createdAt || new Date().toISOString();
-    this.updatedAt = data.updatedAt || new Date().toISOString();
+  constructor(data = {}) {
+    this.id = data.id ?? null;
+    this.deviceId = data.deviceId ?? data.device_id ?? null;
+    this.userId = data.userId ?? data.user_id ?? null;
+    this.isPremium = this._toBool(data.isPremium ?? data.is_premium, false);
+    this.expiryDate = data.expiryDate ?? data.expiry_date ?? null;
+    this.purchasedDate = data.purchasedDate ?? data.purchased_date ?? null;
+    this.planId = data.planId ?? data.plan_id ?? 'pro';
+    this.receiptData = data.receiptData ?? data.receipt_data ?? null;
+    this.packageIdentifier = data.packageIdentifier ?? data.package_identifier ?? null;
+    this.isTrial = this._toBool(data.isTrial ?? data.is_trial, false);
+    this.trialStartDate = data.trialStartDate ?? data.trial_start_date ?? null;
+    this.createdAt = data.createdAt ?? data.created_at ?? new Date().toISOString();
+    this.updatedAt = data.updatedAt ?? data.updated_at ?? new Date().toISOString();
+  }
+
+  _toBool(value, fallback) {
+    if (value === undefined || value === null) return fallback;
+    return value === true || value === 1 || value === '1';
   }
 
   toJSON() {
@@ -33,13 +43,11 @@ class PremiumDevice {
     };
   }
 
-  // Check if premium is still valid
   isExpired() {
     if (!this.expiryDate) return true;
     return new Date() > new Date(this.expiryDate);
   }
 
-  // Get days remaining
   getDaysRemaining() {
     if (!this.expiryDate || this.isExpired()) return 0;
     const now = new Date();
