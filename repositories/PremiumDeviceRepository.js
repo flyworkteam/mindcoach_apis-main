@@ -64,13 +64,27 @@ class PremiumDeviceRepository {
         trialStartDate,
       } = data;
 
-      // Check if device already exists
-      const existing = await this.findByDeviceId(deviceId);
+      // Nested executeWithRetry YAPMA — aynı circuit breaker'ı çift sayar.
+      // Doğrudan pool sorgusu kullan.
+      const [existingRows] = await pool.execute(
+        `SELECT id, created_at, trial_start_date, is_trial FROM premium_devices
+         WHERE device_id = ? LIMIT 1`,
+        [deviceId]
+      );
+      const existing = existingRows.length > 0 ? existingRows[0] : null;
       const now = new Date().toISOString();
 
+      // Trial geçmişini koru: ücretli satın almada önceki trial_start_date'i silme.
+      const preservedTrialStart =
+        trialStartDate ||
+        (existing && existing.trial_start_date
+          ? (existing.trial_start_date instanceof Date
+              ? existing.trial_start_date.toISOString()
+              : existing.trial_start_date)
+          : null);
+
       if (existing) {
-        // Update existing record
-        const [result] = await pool.execute(
+        await pool.execute(
           `UPDATE premium_devices
            SET user_id = ?,
                is_premium = ?,
@@ -92,7 +106,7 @@ class PremiumDeviceRepository {
             receiptData,
             packageIdentifier,
             isTrial,
-            trialStartDate,
+            preservedTrialStart,
             now,
             deviceId,
           ]
@@ -100,39 +114,40 @@ class PremiumDeviceRepository {
 
         return new PremiumDevice({
           ...data,
-          createdAt: existing.createdAt,
-          updatedAt: now,
-        });
-      } else {
-        // Create new record
-        const [result] = await pool.execute(
-          `INSERT INTO premium_devices
-           (device_id, user_id, is_premium, expiry_date, purchased_date,
-            plan_id, receipt_data, package_identifier, is_trial, trial_start_date, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            deviceId,
-            userId,
-            isPremium,
-            expiryDate,
-            purchasedDate,
-            planId,
-            receiptData,
-            packageIdentifier,
-            isTrial,
-            trialStartDate,
-            now,
-            now,
-          ]
-        );
-
-        return new PremiumDevice({
-          id: result.insertId,
-          ...data,
-          createdAt: now,
+          trialStartDate: preservedTrialStart,
+          createdAt: existing.created_at,
           updatedAt: now,
         });
       }
+
+      const [result] = await pool.execute(
+        `INSERT INTO premium_devices
+         (device_id, user_id, is_premium, expiry_date, purchased_date,
+          plan_id, receipt_data, package_identifier, is_trial, trial_start_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          deviceId,
+          userId,
+          isPremium,
+          expiryDate,
+          purchasedDate,
+          planId,
+          receiptData,
+          packageIdentifier,
+          isTrial,
+          preservedTrialStart,
+          now,
+          now,
+        ]
+      );
+
+      return new PremiumDevice({
+        id: result.insertId,
+        ...data,
+        trialStartDate: preservedTrialStart,
+        createdAt: now,
+        updatedAt: now,
+      });
     }, 2, 'createOrUpdate');
   }
 
@@ -163,9 +178,10 @@ class PremiumDeviceRepository {
    */
   static async hasUsedTrialByUserId(userId) {
     return executeWithRetry(async () => {
+      // is_trial=0 olsa bile trial_start_date kaldıysa trial tüketilmiş say.
       const [rows] = await pool.execute(
         `SELECT 1 FROM premium_devices
-         WHERE user_id = ? AND is_trial = 1
+         WHERE user_id = ? AND (is_trial = 1 OR trial_start_date IS NOT NULL)
          LIMIT 1`,
         [userId]
       );
@@ -299,6 +315,7 @@ class PremiumDeviceRepository {
         daysRemaining: isExpired ? 0 : device.getDaysRemaining(),
         expiryDate: device.expiryDate,
         planId: device.planId,
+        isTrial: device.isTrial,
       };
     }, 2, 'getPremiumStatus');
   }

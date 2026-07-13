@@ -294,13 +294,13 @@ class PremiumService {
         const userPremium = await PremiumDeviceRepository.findActivePremiumByUserId(userId);
         if (userPremium) {
           if (userPremium.isExpired()) {
-            if (userPremium.deviceId) {
-              await PremiumDeviceRepository.deactivatePremium(userPremium.deviceId);
-            } else {
-              console.warn(
-                `[PremiumService] Expired premium for userId=${userId} has no deviceId; skipped deactivate`,
-              );
-            }
+            // Kullanıcının tüm cihaz satırlarını kapat (tek cihaz değil).
+            await PremiumDeviceRepository.applyStatusByUserId(userId, {
+              isPremium: false,
+              expiryDate: userPremium.expiryDate,
+              planId: userPremium.planId,
+              isTrial: false,
+            });
           } else {
             return {
               success: true,

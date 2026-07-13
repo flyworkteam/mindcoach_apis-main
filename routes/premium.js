@@ -76,7 +76,14 @@ router.post('/initialize', async (req, res, next) => {
  */
 router.post('/confirm-purchase', async (req, res, next) => {
   try {
-    const { deviceId, userId, receiptData, packageIdentifier } = req.body;
+    const {
+      deviceId,
+      userId,
+      receiptData,
+      packageIdentifier,
+      expiryDate,
+      isTrial,
+    } = req.body;
 
     if (!deviceId || !receiptData) {
       return res.status(400).json({
@@ -89,11 +96,16 @@ router.post('/confirm-purchase', async (req, res, next) => {
     // This is a security-critical operation that should validate the receipt
     // Example: await verifyReceiptWithRevenueCat(receiptData);
 
+    const parsedUserId = userId != null ? parseInt(userId, 10) : null;
+
     const result = await PremiumService.confirmPurchase({
       deviceId,
-      userId: userId ?? null,
+      userId: Number.isFinite(parsedUserId) ? parsedUserId : null,
       receiptData,
       packageIdentifier: packageIdentifier ?? null,
+      // Flutter RevenueCat listener gerçek bitiş tarihini ve trial bilgisini gönderir.
+      expiryDate: expiryDate ?? null,
+      isTrial: isTrial === true,
     });
 
     res.status(200).json(result);
@@ -114,20 +126,15 @@ router.post('/confirm-purchase', async (req, res, next) => {
  */
 router.post('/revenuecat-webhook', async (req, res) => {
   try {
-    const expected = process.env.REVENUECAT_WEBHOOK_AUTH;
+    const expected = (process.env.REVENUECAT_WEBHOOK_AUTH || '').trim();
 
-    // Güvenlik: RC panelinde bir Authorization header tanımlanmışsa doğrula.
-    // Tanımlı değilse (env yok) endpoint'i açık bırakmayıp reddet — yanlış
-    // yapılandırmayı sessizce kabul etmemek için.
-    if (!expected) {
-      console.error('[RC-WEBHOOK] REVENUECAT_WEBHOOK_AUTH tanımlı değil; istek reddedildi.');
-      return res.status(503).json({ success: false, error: 'Webhook not configured' });
-    }
-
-    const provided = req.headers['authorization'];
-    if (provided !== expected) {
-      console.warn('[RC-WEBHOOK] Geçersiz Authorization header; istek reddedildi.');
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    // Auth opsiyonel: .env'de tanımlıysa doğrula, boşsa devam et.
+    if (expected) {
+      const provided = req.headers['authorization'];
+      if (provided !== expected) {
+        console.warn('[RC-WEBHOOK] Geçersiz Authorization header; istek reddedildi.');
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
     }
 
     const event = req.body && req.body.event ? req.body.event : req.body;
