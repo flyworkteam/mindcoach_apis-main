@@ -156,8 +156,13 @@ class NotificationScheduler {
   static async runCoachIdle24h() {
     const chats = await ChatRepository.findChatsWithLastMessageHoursAgo(24, 1);
     const hourKey = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+    // Kullanıcı başına en fazla 1: birden fazla idle chat olsa da aynı anda 2 push gitmez.
+    const seenUsers = new Set();
     for (const row of chats) {
-      const eventKey = `coach_idle_24h:${row.id}:${hourKey}`;
+      if (seenUsers.has(row.user_id)) continue;
+      seenUsers.add(row.user_id);
+
+      const eventKey = `coach_idle_24h:${hourKey}`;
       const claimed = await NotificationEventRepository.claim(row.user_id, eventKey);
       if (!claimed) continue;
       let consultant = null;
@@ -171,10 +176,15 @@ class NotificationScheduler {
 
   static async runCoachIdle3d(dateKey) {
     const chats = await ChatRepository.findChatsWithLastMessageDaysAgo(3);
+    // Kullanıcı başına en fazla 1 (çoklu sohbet → çift push önlemi).
+    const seenUsers = new Set();
     for (const row of chats) {
+      if (seenUsers.has(row.user_id)) continue;
+      seenUsers.add(row.user_id);
+
       const claimed = await NotificationEventRepository.claim(
         row.user_id,
-        `coach_idle_3d:${row.id}:${dateKey}`
+        `coach_idle_3d:${dateKey}`
       );
       if (!claimed) continue;
       let consultant = null;

@@ -134,7 +134,10 @@ class NotificationRepository {
   static async countUnread(userId) {
     try {
       const [rows] = await pool.execute(
-        `SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND is_read = false`,
+        `SELECT COUNT(*) AS c FROM notifications
+          WHERE user_id = ?
+            AND is_read = false
+            AND COALESCE(type, '') <> 'chat_message'`,
         [userId]
       );
       return rows[0].c;
@@ -178,16 +181,34 @@ class NotificationRepository {
     try {
       const [rows] = await pool.execute(
         `SELECT * FROM notifications 
-         WHERE user_id = ? 
+         WHERE user_id = ?
+           AND COALESCE(type, '') <> 'chat_message'
+           AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.trigger')), '') <> 'therapist_message'
          ORDER BY sentTime DESC 
          LIMIT ? OFFSET ?`,
-        [userId, limit, offset]
+        [userId, Number(limit), Number(offset)]
       );
 
       return rows.map(row => this.mapRowToNotification(row));
     } catch (error) {
-      console.error('Error finding notifications by user ID:', error);
-      throw error;
+      // Eski MySQL sürümlerinde JSON_EXTRACT sorun çıkarırsa type filtresiyle devam et
+      console.error('Error finding notifications by user ID (json filter):', error.message);
+      try {
+        const [rows] = await pool.execute(
+          `SELECT * FROM notifications 
+           WHERE user_id = ?
+             AND COALESCE(type, '') <> 'chat_message'
+           ORDER BY sentTime DESC 
+           LIMIT ? OFFSET ?`,
+          [userId, Number(limit), Number(offset)]
+        );
+        return rows
+          .map(row => this.mapRowToNotification(row))
+          .filter((n) => (n.metadata && n.metadata.trigger) !== 'therapist_message');
+      } catch (fallbackError) {
+        console.error('Error finding notifications by user ID:', fallbackError);
+        throw fallbackError;
+      }
     }
   }
 

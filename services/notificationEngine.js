@@ -205,7 +205,7 @@ class NotificationEngine {
   static async _deliver(userId, notification, options) {
     const metadata = this._buildMetadata(notification, options);
 
-    // OneSignal push (başarısız olsa da DB'ye kaydederiz)
+    // OneSignal push (başarısız olsa da DB'ye kaydederiz — inbox tipi hariç)
     try {
       await OneSignalService.sendNotification(
         userId,
@@ -218,10 +218,25 @@ class NotificationEngine {
       console.error('[NOTIF-ENGINE] OneSignal gönderim hatası (DB kaydı devam):', err.message);
     }
 
+    // Sohbet mesajı push'ları in-app bildirim listesini "son sohbetler" gibi
+    // doldurmasın; mesajlar zaten chat geçmişinde. Sadece OS bildirim gitsin.
+    if (this._isChatMessageOnly(notification)) {
+      return null;
+    }
+
     return this._persist(userId, notification, { ...options, metadata, pushed: true });
   }
 
+  static _isChatMessageOnly(notification) {
+    const type = notification?.type;
+    const trigger = notification?.trigger;
+    return type === 'chat_message' || trigger === 'therapist_message';
+  }
+
   static async _persist(userId, notification, options = {}) {
+    if (this._isChatMessageOnly(notification)) {
+      return null;
+    }
     const metadata = options.metadata || this._buildMetadata(notification, options);
     try {
       return await NotificationRepository.create({
