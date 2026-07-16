@@ -155,16 +155,26 @@ class ElevenLabsTTSSession extends EventEmitter {
     this._send(payload);
   }
 
-  /** Signal end of text (EOS) so remaining audio is flushed */
+  /** Signal end of text (EOS) so remaining audio is flushed.
+   *
+   *  We first send a whitespace chunk with `try_trigger_generation:true` so
+   *  ElevenLabs is forced to generate audio for whatever text is still
+   *  sitting in its chunk-length buffer, THEN the EOS. Without this the
+   *  last sentence of short responses (< chunk_length_schedule[0]) can get
+   *  swallowed because EL waits for more text that never comes.
+   */
   finish() {
     if (this.aborted || this.finished) return;
     this.finished = true;
-    const payload = { text: '' };
+    const triggerPayload = { text: ' ', try_trigger_generation: true };
+    const eosPayload = { text: '' };
     if (!this.opened) {
-      this._pendingSends.push(payload);
+      this._pendingSends.push(triggerPayload);
+      this._pendingSends.push(eosPayload);
       return;
     }
-    this._send(payload);
+    this._send(triggerPayload);
+    this._send(eosPayload);
   }
 
   /** Immediate abort for barge-in */

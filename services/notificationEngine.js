@@ -22,6 +22,7 @@ const {
   NON_OPTOUTABLE_TRIGGERS,
   buildNotification,
 } = require('../config/notificationCatalog');
+const { normalizeLang } = require('../config/notificationI18n');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000; // "aktif kullanıcı" = son 24 saatte açmış
@@ -35,6 +36,20 @@ class NotificationEngine {
    * @param {Object} options - ek seçenekler (bkz. dispatch)
    */
   static async sendTrigger(userId, triggerKey, params = {}, options = {}) {
+    // Kullanıcının seçili dilini (nativeLang) otomatik olarak params'a enjekte
+    // et; caller override etmişse dokunma. Böylece tüm şablonlar kullanıcı
+    // diline göre metin üretebiliyor.
+    if (params.lang == null) {
+      try {
+        const user = await UserRepository.findById(userId);
+        params = { ...params, lang: normalizeLang(user?.nativeLang) };
+      } catch (_) {
+        params = { ...params, lang: 'en' };
+      }
+    } else {
+      params = { ...params, lang: normalizeLang(params.lang) };
+    }
+
     const notification = buildNotification(triggerKey, params);
     if (!notification) {
       console.warn(`[NOTIF-ENGINE] Bilinmeyen trigger: ${triggerKey}`);

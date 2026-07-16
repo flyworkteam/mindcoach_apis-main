@@ -4,12 +4,34 @@
  */
 
 const AppointmentRepository = require('../repositories/AppointmentRepository');
+const UserRepository = require('../repositories/UserRepository');
 const UserService = require('./userService');
 const ConsultantService = require('./consultantService');
 const OneSignalService = require('./oneSignalService');
 const NotificationRepository = require('../repositories/NotificationRepository');
 const NotificationEngine = require('./notificationEngine');
 const { parseAbsoluteAppointmentDate } = require('../utils/appointmentDateUtils');
+const { getLocalizedTexts, normalizeLang } = require('../config/notificationI18n');
+
+/**
+ * User'ın seçili dilini getir (nativeLang). Hata veya eksik durumda 'en' fallback.
+ */
+async function getUserLang(userId) {
+  try {
+    const user = await UserRepository.findById(userId);
+    return normalizeLang(user?.nativeLang);
+  } catch (_) {
+    return 'en';
+  }
+}
+
+/**
+ * Consultant için verilen dile göre isim seç (fallback: en → tr → ilk).
+ */
+function pickConsultantName(consultant, lang) {
+  const names = consultant?.names || {};
+  return names[lang] || names.en || names.tr || Object.values(names)[0] || 'Coach';
+}
 
 class AppointmentService {
   /**
@@ -92,13 +114,13 @@ class AppointmentService {
         'pending'
       );
 
-      // Get consultant name for notification
-      const consultantName = consultant.names?.tr || consultant.names?.en || consultant.names?.de || 'Koç';
-      
-      // Prepare notification message
-      const notificationTitle = 'Yeni Randevu';
-      const notificationSubtitle = `${consultantName}, sizin için randevu oluşturdu`;
-      const notificationMessage = 'Randevunuz oluşturuldu';
+      // Kullanıcının seçili diline göre bildirim metinlerini hazırla.
+      const lang = normalizeLang(user?.nativeLang);
+      const consultantName = pickConsultantName(consultant, lang);
+      const { title: notificationTitle, subtitle: notificationSubtitle } =
+        getLocalizedTexts('appointment_created', lang, { name: consultantName });
+      // Response'daki `notification` alanı (opsiyonel) da lokalize.
+      const notificationMessage = notificationSubtitle;
 
       // Önce kullanıcıya mesaj dönsün, ardından bildirimi gönder.
       setTimeout(() => {
@@ -348,12 +370,14 @@ async function sendAppointmentNotification(userId, consultantId, title, subtitle
  */
 async function sendCancellationNotification(userId, consultantId, appointmentId) {
   try {
+    const lang = await getUserLang(userId);
+    const { title, subtitle } = getLocalizedTexts('appointment_cancelled', lang);
     await NotificationEngine.dispatch(userId, {
       category: 'system',
       type: 'system_notification',
       trigger: 'appointment_cancelled',
-      title: 'Randevu İptal Edildi',
-      subtitle: 'Randevunuz iptal edildi',
+      title,
+      subtitle,
       deepLink: 'appointments',
     }, {
       extraMetadata: {
@@ -379,12 +403,14 @@ async function sendCancellationNotification(userId, consultantId, appointmentId)
  */
 async function sendReactivationNotification(userId, consultantId, appointmentId) {
   try {
+    const lang = await getUserLang(userId);
+    const { title, subtitle } = getLocalizedTexts('appointment_reactivated', lang);
     await NotificationEngine.dispatch(userId, {
       category: 'system',
       type: 'system_notification',
       trigger: 'appointment_reactivated',
-      title: 'Randevu Yeniden Aktif',
-      subtitle: 'Randevunuz tekrar aktif hale getirildi',
+      title,
+      subtitle,
       deepLink: 'appointments',
     }, {
       extraMetadata: {

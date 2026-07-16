@@ -23,6 +23,7 @@ class OpenAIRealtimeSession extends EventEmitter {
    * @param {string} [opts.language]    Response language code (e.g. "tr")
    * @param {number} [opts.temperature]
    * @param {string} [opts.model]
+   * @param {Array}  [opts.tools]       Optional tools (function calling) for GA session
    */
   constructor(opts = {}) {
     super();
@@ -33,11 +34,16 @@ class OpenAIRealtimeSession extends EventEmitter {
     this.language = opts.language || 'tr';
     this.temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.8;
     this.model = resolveRealtimeModel(opts.model);
+    // Tools schema (function calling). Left null if the caller didn't
+    // supply any — we simply omit the field from session.update in that case.
+    this.tools = Array.isArray(opts.tools) && opts.tools.length ? opts.tools : null;
 
     this.ws = null;
     this.isReady = false;
     this.closed = false;
     this.currentResponseId = null;
+    // Per-function-call argument accumulator: callId → { name, args, itemId }
+    this._pendingFnCalls = new Map();
   }
 
   /** Open the WebSocket connection to OpenAI and send session.update */
@@ -106,7 +112,7 @@ TONE:
     //   • `temperature` kaldırıldı
     // TTS harici (ElevenLabs) olduğundan yalnızca `text` çıkışı istiyoruz;
     // `audio.output`/`voice` gerekmiyor.
-    this._send({
+    const sessionUpdate = {
       type: 'session.update',
       session: {
         type: 'realtime',
@@ -132,7 +138,12 @@ TONE:
           },
         },
       },
-    });
+    };
+    if (this.tools) {
+      sessionUpdate.session.tools = this.tools;
+      sessionUpdate.session.tool_choice = 'auto';
+    }
+    this._send(sessionUpdate);
 
     console.log(`[OPENAI-RT] ✅ Connected & configured`);
     this.isReady = true;
@@ -184,6 +195,55 @@ TONE:
         case 'response.output_text.done':
           this.emit('text_done', { text: event.text || '' });
           break;
+
+        // ── Function calling (tools) ────────────────────────────────────
+        // GA event shape:
+        //   response.output_item.added        — output item may be a function_call
+        //   response.function_call_arguments.delta  — streamed JSON args
+        //   response.function_call_arguments.done   — final JSON args string
+        case 'response.output_item.added': {
+          const item = event.item || {};
+          if (item.type === 'function_call' && item.call_id) {
+            this._pendingFnCalls.set(item.call_id, {
+              name: item.name || '',
+              args: '',
+              itemId: item.id || null,
+            });
+          }
+          break;
+        }
+
+        case 'response.function_call_arguments.delta': {
+          const callId = event.call_id;
+          const bucket = this._pendingFnCalls.get(callId);
+          if (bucket && typeof event.delta === 'string') {
+            bucket.args += event.delta;
+          }
+          break;
+        }
+
+        case 'response.function_call_arguments.done': {
+          const callId = event.call_id;
+          const bucket = this._pendingFnCalls.get(callId) || {
+            name: event.name || '',
+            args: '',
+            itemId: null,
+          };
+          const rawArgs = typeof event.arguments === 'string'
+            ? event.arguments
+            : bucket.args;
+          this._pendingFnCalls.delete(callId);
+          let parsed = {};
+          try { parsed = rawArgs ? JSON.parse(rawArgs) : {}; }
+          catch (_) { parsed = { __raw: rawArgs }; }
+          this.emit('function_call', {
+            callId,
+            name: bucket.name || event.name || '',
+            args: parsed,
+            itemId: bucket.itemId,
+          });
+          break;
+        }
 
         case 'response.done':
           this.currentResponseId = null;
@@ -283,6 +343,36 @@ TONE:
     };
     if (overrideInstructions) msg.response.instructions = overrideInstructions;
     this._send(msg);
+  }
+
+  /**
+   * Return the JSON result of a function call to the LLM and trigger a new
+   * response. Use this in the `function_call` event handler after the app
+   * has executed the requested action.
+   *
+   * @param {string} callId  The call_id from the function_call event.
+   * @param {Object|string} output  Serializable output (will be JSON.stringify'd if not already a string).
+   * @param {boolean} [createResponse=true]  Immediately request the LLM's follow-up response.
+   */
+  submitFunctionOutput(callId, output, createResponse = true) {
+    if (!this.isReady || this.closed) return;
+    if (!callId) return;
+    const payload =
+      typeof output === 'string' ? output : JSON.stringify(output ?? {});
+    this._send({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: payload,
+      },
+    });
+    if (createResponse) {
+      this._send({
+        type: 'response.create',
+        response: { output_modalities: ['text'] },
+      });
+    }
   }
 
   /** Cancel an in-flight response (for barge-in). No-op if no active response. */

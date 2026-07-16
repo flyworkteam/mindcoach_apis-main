@@ -1019,13 +1019,29 @@ class VoiceChatServerV2 {
 
     // ── Set up OpenAI Realtime session ───────────────────────────────────────
     try {
-      const instructions = await this._buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang, mode);
+      // Analysis mode uses tools (function calling): the AI recommends a
+      // consultant and can create an appointment. We fetch the directory here
+      // (once per session) so the LLM has ground-truth ids/names/specialties
+      // to pick from — otherwise it would hallucinate coaches that don't exist.
+      let consultantDirectory = null;
+      if (mode === 'analysis') {
+        consultantDirectory = await this._loadConsultantDirectory(conversationLang);
+        ctx.consultantDirectory = consultantDirectory;
+      }
 
-      ctx.openai = new OpenAIRealtimeSession({
+      const instructions = await this._buildSystemPrompt(
+        consultant, user, userId, consultantId, persona, conversationLang, mode, consultantDirectory
+      );
+
+      const openaiOpts = {
         instructions,
         language: conversationLang,
         temperature: 0.8,
-      });
+      };
+      if (mode === 'analysis') {
+        openaiOpts.tools = this._analysisTools();
+      }
+      ctx.openai = new OpenAIRealtimeSession(openaiOpts);
 
       await ctx.openai.connect();
       this._wireOpenAI(ctx);
@@ -1412,6 +1428,30 @@ class VoiceChatServerV2 {
       }
     });
 
+    // ── Tool / function-calling (analysis mode) ─────────────────────────────
+    // The LLM emits a function_call when it wants us to run one of the
+    // registered tools. We execute it, feed the JSON result back via
+    // submitFunctionOutput() and OpenAI will start a new response so the AI
+    // can react in speech.
+    openai.on('function_call', async (evt) => {
+      if (!evt || !evt.callId) return;
+      const name = String(evt.name || '');
+      const args = evt.args || {};
+      console.log(`[VCv2] 🧰 [${ctx.connectionId}] tool call: ${name} args=${JSON.stringify(args)}`);
+      let output;
+      try {
+        output = await this._runToolCall(ctx, name, args);
+      } catch (e) {
+        console.warn(`[VCv2] ⚠️ [${ctx.connectionId}] tool ${name} failed:`, e?.message || e);
+        output = { ok: false, error: e?.message || 'tool_failed' };
+      }
+      try {
+        ctx.openai?.submitFunctionOutput(evt.callId, output, true);
+      } catch (e) {
+        console.warn(`[VCv2] ⚠️ [${ctx.connectionId}] submitFunctionOutput failed:`, e?.message || e);
+      }
+    });
+
     openai.on('response_cancelled', () => {
       ctx.isAISpeaking = false;
       // If we had started generating text before the barge-in, save that
@@ -1559,7 +1599,12 @@ class VoiceChatServerV2 {
     tts.on('done', () => {
       ctx.isAISpeaking = false;
       this._sendJson(ctx.ws, { type: 'ai_response_complete' });
-      try { tts.abort(); } catch (_) { }
+      // NOTE: Do NOT call tts.abort() here anymore. abort() force-closes the
+      // WebSocket, which on slow networks can arrive at ElevenLabs BEFORE
+      // the last audio frames have been fully drained through the socket,
+      // truncating the final syllable(s) of the AI's reply. `done` already
+      // fires only after EL emits isFinal:true, so the socket will close
+      // cleanly on its own — we just stop referencing it.
       if (ctx.tts === tts) ctx.tts = null;
 
       // Compute how long the audio will take to play on the client based
@@ -1570,10 +1615,11 @@ class VoiceChatServerV2 {
       const firstAudioAt = ctx.turnFirstAudioTime || Date.now();
       const elapsedMs = Date.now() - firstAudioAt;
       const remainingMs = Math.max(0, audioDurationMs - elapsedMs);
-      // Small grace so the very last audio frame finishes decoding on the
-      // client before we start counting silence. 150ms is enough on-device
-      // and keeps the response-to-idle turnaround snappy.
-      const grace = 150;
+      // Grace so the very last audio frame finishes decoding on the client
+      // before we start counting silence. 150ms was too short on slower
+      // networks — the client's own idle/flush timers would cut in and drop
+      // the tail syllable. 500ms is still snappy for a phone-call feel.
+      const grace = 500;
       const waitMs = remainingMs + grace;
 
       console.log(
@@ -2027,7 +2073,110 @@ class VoiceChatServerV2 {
     this._speakCanned(ctx, greetingText, { endAfter: false, persist: false });
   }
 
-  async _buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang = 'tr', mode = null) {
+  /**
+   * Load all active consultants and return a compact list the LLM can reason
+   * about when recommending someone in analysis mode. We keep only the
+   * localized name, id, job, features and short explanation — nothing else
+   * belongs in the system prompt.
+   */
+  async _loadConsultantDirectory(conversationLang = 'tr') {
+    try {
+      const rows = await ConsultantService.getAllConsultants({});
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .map((c) => {
+          const names = c?.names || {};
+          const displayName =
+            names[conversationLang] ||
+            names.en ||
+            names.tr ||
+            Object.values(names).find((v) => typeof v === 'string') ||
+            `Coach #${c.id}`;
+          const features = Array.isArray(c?.features)
+            ? c.features.filter((f) => typeof f === 'string' && f.trim())
+            : [];
+          const explanation = (c?.explanation || '').toString().trim();
+          return {
+            id: c.id,
+            name: displayName,
+            job: (c.job || '').toString().trim(),
+            features,
+            explanation: explanation.slice(0, 220),
+          };
+        })
+        .filter((c) => c.id);
+    } catch (e) {
+      console.warn('[VCv2] ⚠️ loadConsultantDirectory failed:', e?.message || e);
+      return [];
+    }
+  }
+
+  /**
+   * Tool schema (OpenAI Realtime GA function calling) used only in
+   * `mode=analysis`. Kept as data so the same session builder can pass it
+   * straight into `session.tools`.
+   */
+  _analysisTools() {
+    return [
+      {
+        type: 'function',
+        name: 'recommend_consultant',
+        description:
+          "Recommend the single most suitable consultant/coach from the app's directory " +
+          "based on the user's answers. Call ONLY ONCE, right after you have delivered the " +
+          "spoken analysis and BEFORE asking the user if they want to book an appointment. " +
+          "Pick the consultant whose specialty best matches the user's dominant concern.",
+        parameters: {
+          type: 'object',
+          properties: {
+            consultantId: {
+              type: 'integer',
+              description: 'The id of the recommended consultant from the provided directory.',
+            },
+            reason: {
+              type: 'string',
+              description:
+                'Short (1-2 sentence) reason grounded in the user\'s answers. In the same language as the conversation.',
+            },
+          },
+          required: ['consultantId', 'reason'],
+        },
+      },
+      {
+        type: 'function',
+        name: 'create_appointment',
+        description:
+          'Create an appointment for the user with the recommended consultant. Call ONLY after ' +
+          'the user has clearly confirmed they want an appointment AND has given a specific day and time. ' +
+          'Never call this if the user declined, was unsure, or hasn\'t provided a time. Never call ' +
+          'this to just "check" availability — it commits.',
+        parameters: {
+          type: 'object',
+          properties: {
+            consultantId: {
+              type: 'integer',
+              description: 'Id of the consultant recommended earlier.',
+            },
+            isoDateTime: {
+              type: 'string',
+              description:
+                'The appointment date and time in ISO 8601 (UTC preferred, e.g. "2026-08-14T13:30:00Z"). ' +
+                'Interpret the user\'s spoken time in their local timezone provided in the context, then convert to UTC.',
+            },
+            userLocalDescription: {
+              type: 'string',
+              description:
+                'Human-friendly phrasing of the chosen slot in the user\'s language, e.g. "Salı 14:30". ' +
+                'Used only to echo back to the user; do not localize the ISO string.',
+            },
+          },
+          required: ['consultantId', 'isoDateTime'],
+        },
+      },
+    ];
+  }
+
+  async _buildSystemPrompt(consultant, user, userId, consultantId, persona, conversationLang = 'tr', mode = null, consultantDirectory = null) {
     // ─── Coach identity ──────────────────────────────────────────────────────
     // Localized name from consultant.names map (e.g. {tr:"...", en:"..."}).
     // Fall back to en, then to the first available value.
@@ -2046,6 +2195,32 @@ class VoiceChatServerV2 {
     if (mode === 'analysis') {
       const userName = (user?.username || '').toString().trim();
       const nameLine = userName ? ` The user's name is ${userName}.` : '';
+
+      // Directory of available coaches the AI can recommend at the end.
+      // We keep it compact — only fields the LLM needs to reason about fit.
+      const dir = Array.isArray(consultantDirectory) ? consultantDirectory : [];
+      const directoryBlock = dir.length
+        ? `\n\nAVAILABLE COACHES (choose exactly ONE to recommend at the end using the recommend_consultant tool):\n` +
+          dir
+            .map((c) => {
+              const feat = c.features?.length ? ` | focus: ${c.features.join(', ')}` : '';
+              const job = c.job ? ` | ${c.job}` : '';
+              const exp = c.explanation ? ` — ${c.explanation}` : '';
+              return `- id=${c.id} · ${c.name}${job}${feat}${exp}`;
+            })
+            .join('\n')
+        : '';
+
+      // Time context: LLM must convert user's spoken time to ISO UTC for the
+      // create_appointment tool. We give it "now" in ISO + timezone hint.
+      const nowIso = new Date().toISOString();
+      const tzHint = user?.timezone || user?.tz || null;
+      const timeBlock =
+        `\n\nTIME CONTEXT:\n` +
+        `- Server time now (UTC ISO 8601): ${nowIso}\n` +
+        (tzHint
+          ? `- User's timezone hint: ${tzHint} (interpret user's spoken time in this timezone, then convert to UTC ISO before calling create_appointment).\n`
+          : `- No explicit user timezone known. When the user says a time, ask which day (today, tomorrow, or a specific weekday) if unclear, then convert to a full UTC ISO 8601 string for create_appointment. Prefer the user's most likely local timezone based on their language.\n`);
       return (
         `YOU ARE ${coachName}, a warm, empathetic psychologist and emotional ` +
         `well-being guide inside the MindCoach app.${nameLine}\n\n` +
@@ -2080,6 +2255,62 @@ class VoiceChatServerV2 {
         `concerns.\n` +
         `7. Keep count of the questions you have asked so you stop at 10 and ` +
         `then give the analysis. Do not restart the questionnaire afterwards.\n\n` +
+        `RECOMMEND A COACH (after the analysis, mandatory):\n` +
+        `A. Silently pick the SINGLE coach from the directory below whose ` +
+        `specialty best matches the user's dominant concern (anxiety, sleep, ` +
+        `motivation, relationships, etc.). Do NOT read the directory aloud, ` +
+        `do NOT compare coaches, do NOT list them.\n` +
+        `B. Call the tool "recommend_consultant" ONCE with { consultantId, reason }. ` +
+        `Then, in your NEXT spoken turn, introduce that coach warmly and naturally ` +
+        `— use their NAME and mention their specialty in one flowing sentence, ` +
+        `something in the spirit of: "Sana [Coach Name] ile görüşmeni öneririm; ` +
+        `[bu alanda / bu konuda] oldukça iyi." Adapt the exact wording to the ` +
+        `user's language and to what they actually shared with you. Immediately ` +
+        `after that, in the SAME turn, ask if they'd like an appointment: ` +
+        `something in the spirit of "İstersen senin için [Coach Name] ile bir ` +
+        `randevu oluşturalım, ne dersin?" (again in the user's language). Keep it ` +
+        `soft and inviting, never pushy.\n\n` +
+        `C. If the user says NO, is unsure, wants to think about it, or gives any ` +
+        `answer that is not a clear yes: DO NOT call create_appointment. Reassure ` +
+        `them warmly and close the session with a message in the spirit of: ` +
+        `"Tamam, nasıl istersen — kendini asla baskı altında hissetmeni istemem. ` +
+        `Fikrin değişirse istediğin an uygulamadaki 'Randevu Oluştur' bölümünden ` +
+        `kolayca randevu alabilirsin. Bugünlük psikolojik analizimiz bu kadardı, ` +
+        `kendine iyi bak." Adapt to the user's language, say it naturally, then stop.\n\n` +
+        `D. If the user says YES (or something clearly affirmative), ask which ` +
+        `day and time works for them. Ask ONE short question at a time and keep ` +
+        `it conversational.\n` +
+        `   • If the user's answer is not clear or you truly cannot make out what ` +
+        `they said, ask them to repeat gently — in the spirit of "Kusura bakma, ` +
+        `seni tam duyamadım — tekrar eder misin?" (in the user's language). Do ` +
+        `not guess a time.\n` +
+        `   • Once you have BOTH a specific day and a specific time, convert them ` +
+        `to a full UTC ISO 8601 string and call the tool "create_appointment" ` +
+        `with { consultantId, isoDateTime, userLocalDescription }.\n` +
+        `   • Before calling the tool, silently compare the chosen datetime to ` +
+        `the "Server time now" given below. If it is in the PAST (even by an ` +
+        `hour), DO NOT call the tool. Instead, gently remind the user in their ` +
+        `language — in the spirit of: "Ah, o tarih artık geçmiş; senin için ` +
+        `ileri bir güne bakalım mı? Hangi gün ve saat sana daha uygun?" — then ` +
+        `wait for a new answer.\n` +
+        `E. When the create_appointment tool returns:\n` +
+        `   • ok=true → warmly confirm the day/time in words (never read the ISO ` +
+        `string aloud), thank them, and end the session warmly.\n` +
+        `   • ok=false with error="slot_taken" → apologize briefly and offer to ` +
+        `try a different time.\n` +
+        `   • ok=false with error="duplicate_with_consultant" → tell the user ` +
+        `they already have an appointment with this coach and ask if they want ` +
+        `to keep it.\n` +
+        `   • any other error → apologize briefly and offer to try again.\n` +
+        `   • Never invent a confirmation without a real tool result.\n\n` +
+        `TOOL CALLING RULES:\n` +
+        `- Tools are silent. NEVER read tool names, JSON, IDs or reasons out loud.\n` +
+        `- Call recommend_consultant AT MOST ONCE per session, immediately after ` +
+        `the analysis and BEFORE offering the appointment.\n` +
+        `- Call create_appointment ONLY after (a) an explicit user confirmation, ` +
+        `(b) a concrete day AND a concrete time, and (c) that datetime is in ` +
+        `the future. Never guess a time on the user's behalf. Never call it ` +
+        `just to "check" — it commits.\n\n` +
         `STYLE:\n` +
         `- Warm, calm, supportive and human. Short spoken sentences.\n` +
         `- Stay in character as ${coachName}. You are not an AI or a language ` +
@@ -2089,7 +2320,9 @@ class VoiceChatServerV2 {
         `LANGUAGE:\n` +
         `- Conduct the ENTIRE session in the user's language ` +
         `(code: ${conversationLang}). If the user clearly switches language, ` +
-        `follow them.`
+        `follow them.` +
+        directoryBlock +
+        timeBlock
       );
     }
 
@@ -2159,6 +2392,120 @@ class VoiceChatServerV2 {
     const baseBlock = base ? `\n\nADDITIONAL CHARACTER NOTES:\n${base}` : '';
 
     return `${identityBlock}${boundaryBlock}${baseBlock}${profile}${appt}${toneBlock}`;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Tool call dispatch (analysis mode)
+  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Execute a tool call requested by the LLM. Returns a JSON-serializable
+   * object that will be handed back via `function_call_output`. The shape is
+   * always { ok: boolean, ... } so the LLM can branch on success/failure
+   * without parsing prose.
+   */
+  async _runToolCall(ctx, name, args) {
+    if (!ctx || ctx.closed) return { ok: false, error: 'session_closed' };
+
+    if (name === 'recommend_consultant') {
+      const wantedId = parseInt(args?.consultantId, 10);
+      const directory = Array.isArray(ctx.consultantDirectory) ? ctx.consultantDirectory : [];
+      const match = directory.find((c) => c.id === wantedId);
+      if (!match) {
+        return {
+          ok: false,
+          error: 'unknown_consultant_id',
+          message: 'That consultantId is not in the directory. Pick an id from the AVAILABLE COACHES list.',
+        };
+      }
+      ctx.recommendedConsultantId = match.id;
+      ctx.recommendedConsultantName = match.name;
+      // Also tell the client so the UI can show the coach's card afterwards
+      // (optional — the client is free to ignore this message).
+      this._sendJson(ctx.ws, {
+        type: 'recommended_consultant',
+        consultantId: match.id,
+        consultantName: match.name,
+        job: match.job || '',
+        features: match.features || [],
+        reason: (args?.reason || '').toString().slice(0, 400),
+      });
+      return {
+        ok: true,
+        consultantId: match.id,
+        consultantName: match.name,
+        job: match.job || '',
+        features: match.features || [],
+        note: 'Now speak: warmly introduce this coach by name in the user\'s language, give one short reason, and ask if the user wants an appointment.',
+      };
+    }
+
+    if (name === 'create_appointment') {
+      // Safety: only create appointments for a coach that was just recommended
+      // (or at least exists in the directory). This prevents the LLM from
+      // booking a random id it made up.
+      const consultantId = parseInt(args?.consultantId, 10);
+      const iso = (args?.isoDateTime || '').toString().trim();
+      const localDesc = (args?.userLocalDescription || '').toString().trim();
+      const directory = Array.isArray(ctx.consultantDirectory) ? ctx.consultantDirectory : [];
+      const inDirectory = directory.some((c) => c.id === consultantId);
+      if (!consultantId || !inDirectory) {
+        return { ok: false, error: 'invalid_consultant', message: 'consultantId must be one from the recommended directory.' };
+      }
+      if (!iso) {
+        return { ok: false, error: 'missing_datetime', message: 'isoDateTime is required (UTC ISO 8601).' };
+      }
+      // Basic ISO shape check; the service does the strict parse.
+      const dt = new Date(iso);
+      if (isNaN(dt.getTime())) {
+        return { ok: false, error: 'bad_datetime', message: 'isoDateTime is not a valid ISO 8601 string.' };
+      }
+
+      try {
+        const result = await AppointmentService.createAppointmentFromWebhook(
+          ctx.userId,
+          consultantId,
+          dt.toISOString()
+        );
+        // Tell the client so the UI can pop a toast / update the calendar view.
+        this._sendJson(ctx.ws, {
+          type: 'appointment_created',
+          consultantId,
+          appointmentDate: dt.toISOString(),
+          userLocalDescription: localDesc,
+        });
+        return {
+          ok: true,
+          consultantId,
+          appointmentDate: dt.toISOString(),
+          userLocalDescription: localDesc,
+          note: 'Confirm briefly in the user\'s language (e.g. "Booked for Salı 14:30, see you then"). Do not read the ISO string aloud.',
+          serverMessage: result?.notificationSubtitle || null,
+        };
+      } catch (e) {
+        const msg = e?.message || 'create_failed';
+        // Common domain errors the LLM should react to gracefully.
+        // Map to short codes so the LLM can react without parsing prose.
+        let code = 'create_failed';
+        if (/already has an appointment with this consultant/i.test(msg)) code = 'duplicate_with_consultant';
+        else if (/already has an appointment at this date and time/i.test(msg)) code = 'slot_taken';
+        else if (/not found/i.test(msg)) code = 'not_found';
+        console.warn(`[VCv2] ⚠️ [${ctx.connectionId}] create_appointment failed:`, msg);
+        return {
+          ok: false,
+          error: code,
+          message: msg,
+          userLocalDescription: localDesc,
+          note:
+            code === 'slot_taken'
+              ? 'Apologize briefly and offer another time.'
+              : code === 'duplicate_with_consultant'
+                ? 'Tell the user they already have an appointment with this coach and ask if they want to keep it.'
+                : 'Apologize briefly and offer to try again.',
+        };
+      }
+    }
+
+    return { ok: false, error: 'unknown_tool', name };
   }
 
   // ───────────────────────────────────────────────────────────────────────────

@@ -133,43 +133,58 @@ const TEMPLATES = {
     subtitle: `"${previewText(messagePreview, 40)}"`,
     deepLink: `chat/${consultant?.id}`,
   }),
-  incoming_voice_call: ({ consultant }) => ({
-    category: CATEGORY.REALTIME,
-    type: 'incoming_call',
-    trigger: 'incoming_voice_call',
-    title: '📞 Görüşme daveti',
-    subtitle: `${consultantName(consultant)} seninle görüşmeye hazır`,
-    deepLink: `call/incoming/${consultant?.id}`,
-    userInitiated: false,
-  }),
-  incoming_video_call: ({ consultant }) => ({
-    category: CATEGORY.REALTIME,
-    type: 'incoming_video_call',
-    trigger: 'incoming_video_call',
-    title: '🎥 Görüntülü seans',
-    subtitle: `${consultantName(consultant)} görüntülü seans başlatmak istiyor`,
-    deepLink: `videocall/incoming/${consultant?.id}`,
-    userInitiated: false,
-  }),
-  session_reminder: ({ consultant, sessionId }) => ({
-    category: CATEGORY.REALTIME,
-    type: 'session_reminder',
-    trigger: 'session_reminder',
-    title: 'Seans hatırlatma',
-    subtitle: `Seansına 15 dakika kaldı — ${consultantName(consultant)} ile`,
-    deepLink: `session/${sessionId}`,
-    userInitiated: true, // kullanıcının kendi planladığı seans → gece de gönderilebilir
-  }),
+  incoming_voice_call: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('incoming_voice_call', lang, { name });
+    return {
+      category: CATEGORY.REALTIME,
+      type: 'incoming_call',
+      trigger: 'incoming_voice_call',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: `call/incoming/${consultant?.id}`,
+      userInitiated: false,
+    };
+  },
+  incoming_video_call: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('incoming_video_call', lang, { name });
+    return {
+      category: CATEGORY.REALTIME,
+      type: 'incoming_video_call',
+      trigger: 'incoming_video_call',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: `videocall/incoming/${consultant?.id}`,
+      userInitiated: false,
+    };
+  },
+  session_reminder: ({ consultant, sessionId, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('session_reminder', lang, { name });
+    return {
+      category: CATEGORY.REALTIME,
+      type: 'session_reminder',
+      trigger: 'session_reminder',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: `session/${sessionId}`,
+      userInitiated: true, // kullanıcının kendi planladığı seans → gece de gönderilebilir
+    };
+  },
 
   // ---- Kategori 2: TERAPİ / KARAKTER ETKİLEŞİMİ ----
-  onboarding_no_selection: () => ({
-    category: CATEGORY.THERAPY,
-    type: 'therapy_suggestion',
-    trigger: 'onboarding_no_selection',
-    title: 'Sana uygun terapisti seç',
-    subtitle: '25 farklı terapistten sana uygun olanı seç, başlamaya hazır ol',
-    deepLink: 'therapists/browse',
-  }),
+  onboarding_no_selection: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('onboarding_no_selection', lang, {});
+    return {
+      category: CATEGORY.THERAPY,
+      type: 'therapy_suggestion',
+      trigger: 'onboarding_no_selection',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'therapists/browse',
+    };
+  },
   continue_therapy: ({ consultant, lang = 'en' }) => {
     const name = consultantName(consultant, lang);
     return {
@@ -207,58 +222,77 @@ const TEMPLATES = {
       deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
     };
   },
-  new_category: ({ categoryName, categoryId }) => ({
-    category: CATEGORY.THERAPY,
-    type: 'therapy_new_category',
-    trigger: 'new_category',
-    title: 'Yeni terapist kategorisi',
-    subtitle: `Yeni bir terapist kategorisi eklendi: ${categoryName}`,
-    deepLink: `therapists/category/${categoryId}`,
-  }),
+  new_category: ({ categoryName, categoryId, lang = 'en' }) => {
+    const texts = getLocalizedTexts('new_category', lang, { categoryName });
+    return {
+      category: CATEGORY.THERAPY,
+      type: 'therapy_new_category',
+      trigger: 'new_category',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: `therapists/category/${categoryId}`,
+    };
+  },
 
   // ---- Kategori 3: PSİKOLOJİK ANALİZ TESTİ ----
-  analysis_launch: () => ({
-    category: CATEGORY.ANALYSIS,
-    type: 'analysis_launch',
-    trigger: 'analysis_launch',
-    title: '🧠 Yeni özellik',
-    subtitle: 'Görüntülü görüşerek psikolojik analiz testini dene',
-    deepLink: 'analysis-test/intro',
-  }),
-  analysis_never_taken: () => ({
-    category: CATEGORY.ANALYSIS,
-    type: 'analysis_invite',
-    trigger: 'analysis_never_taken',
-    title: 'Kendini keşfet',
-    subtitle: 'Kendini daha iyi tanımak ister misin? Psikolojik analiz testi seni bekliyor',
-    deepLink: 'analysis-test/start',
-  }),
-  analysis_result_ready: ({ resultId }) => ({
-    category: CATEGORY.ANALYSIS,
-    type: 'analysis_result',
-    trigger: 'analysis_result_ready',
-    title: 'Analiz sonucun hazır',
-    subtitle: 'Analiz sonucun hazır — birlikte inceleyelim',
-    deepLink: `analysis-test/results/${resultId}`,
-  }),
-  analysis_periodic_retest: () => ({
-    category: CATEGORY.ANALYSIS,
-    type: 'analysis_retest',
-    trigger: 'analysis_periodic_retest',
-    title: 'Yeni bir analiz',
-    subtitle: 'İstersen 30 gün önceki analizinle bugünü karşılaştırabiliriz',
-    deepLink: 'analysis-test/start',
-  }),
+  analysis_launch: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('analysis_launch', lang, {});
+    return {
+      category: CATEGORY.ANALYSIS,
+      type: 'analysis_launch',
+      trigger: 'analysis_launch',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'analysis-test/intro',
+    };
+  },
+  analysis_never_taken: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('analysis_never_taken', lang, {});
+    return {
+      category: CATEGORY.ANALYSIS,
+      type: 'analysis_invite',
+      trigger: 'analysis_never_taken',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'analysis-test/start',
+    };
+  },
+  analysis_result_ready: ({ resultId, lang = 'en' }) => {
+    const texts = getLocalizedTexts('analysis_result_ready', lang, {});
+    return {
+      category: CATEGORY.ANALYSIS,
+      type: 'analysis_result',
+      trigger: 'analysis_result_ready',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: `analysis-test/results/${resultId}`,
+    };
+  },
+  analysis_periodic_retest: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('analysis_periodic_retest', lang, {});
+    return {
+      category: CATEGORY.ANALYSIS,
+      type: 'analysis_retest',
+      trigger: 'analysis_periodic_retest',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'analysis-test/start',
+    };
+  },
 
   // ---- Kategori 4: RE-ENGAGEMENT (nazik, suçlayıcı değil) ----
-  reengage_3d: ({ consultant }) => ({
-    category: CATEGORY.REENGAGEMENT,
-    type: 'reengagement',
-    trigger: 'reengage_3d',
-    title: 'Nasılsın?',
-    subtitle: `Nasılsın? ${consultantName(consultant)} seninle konuşmaya hazır`,
-    deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
-  }),
+  reengage_3d: ({ consultant, lang = 'en' }) => {
+    const name = consultantName(consultant, lang);
+    const texts = getLocalizedTexts('reengage_3d', lang, { name });
+    return {
+      category: CATEGORY.REENGAGEMENT,
+      type: 'reengagement',
+      trigger: 'reengage_3d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: consultant?.id ? `chat/${consultant.id}` : 'home',
+    };
+  },
   reengage_7d: ({ consultant, lang = 'en' }) => {
     const texts = getLocalizedTexts('app_idle_7d', lang, {
       name: consultantName(consultant, lang),
@@ -283,111 +317,147 @@ const TEMPLATES = {
       deepLink: 'home',
     };
   },
-  reengage_14d: () => ({
-    category: CATEGORY.REENGAGEMENT,
-    type: 'reengagement',
-    trigger: 'reengage_14d',
-    title: 'Seni bekliyoruz',
-    subtitle: 'Yeni terapist kategorileri ve psikolojik analiz testi seni bekliyor',
-    deepLink: 'home',
-  }),
-  reengage_30d: () => ({
-    category: CATEGORY.REENGAGEMENT,
-    type: 'reengagement',
-    trigger: 'reengage_30d',
-    title: 'MindCoach burada',
-    subtitle: 'Ne zaman hazır olursan, MindCoach burada',
-    deepLink: 'home',
-  }),
+  reengage_14d: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('reengage_14d', lang, {});
+    return {
+      category: CATEGORY.REENGAGEMENT,
+      type: 'reengagement',
+      trigger: 'reengage_14d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'home',
+    };
+  },
+  reengage_30d: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('reengage_30d', lang, {});
+    return {
+      category: CATEGORY.REENGAGEMENT,
+      type: 'reengagement',
+      trigger: 'reengage_30d',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'home',
+    };
+  },
 
   // ---- Kategori 5: ABONELİK / PLAN (nötr, net) ----
-  trial_ending: () => ({
-    category: CATEGORY.SUBSCRIPTION,
-    type: 'subscription',
-    trigger: 'trial_ending',
-    title: 'Deneme süren bitiyor',
-    subtitle: 'Deneme süren 2 gün sonra bitiyor',
-    deepLink: 'settings/subscription',
-  }),
-  monthly_renewal: ({ dateText }) => ({
-    category: CATEGORY.SUBSCRIPTION,
-    type: 'subscription',
-    trigger: 'monthly_renewal',
-    title: 'Plan yenileme',
-    subtitle: `Aylık planın ${dateText} tarihinde yenilenecek`,
-    deepLink: 'settings/subscription',
-  }),
-  yearly_renewal: ({ dateText }) => ({
-    category: CATEGORY.SUBSCRIPTION,
-    type: 'subscription',
-    trigger: 'yearly_renewal',
-    title: 'Plan yenileme',
-    subtitle: `Yıllık planın ${dateText} tarihinde yenilenecek`,
-    deepLink: 'settings/subscription',
-  }),
-  payment_failed: () => ({
-    category: CATEGORY.SUBSCRIPTION,
-    type: 'subscription',
-    trigger: 'payment_failed',
-    title: 'Ödeme alınamadı',
-    subtitle: 'Ödemen alınamadı, lütfen kart bilgilerini kontrol et',
-    deepLink: 'settings/payment',
-    critical: true,
-  }),
-  upgrade_offer: () => ({
-    category: CATEGORY.SUBSCRIPTION,
-    type: 'subscription',
-    trigger: 'upgrade_offer',
-    title: 'Yıllık plan',
-    subtitle: 'Yıllık plana geçerek tasarruf edebilirsin',
-    deepLink: 'settings/plans',
-  }),
+  trial_ending: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('trial_ending', lang, {});
+    return {
+      category: CATEGORY.SUBSCRIPTION,
+      type: 'subscription',
+      trigger: 'trial_ending',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/subscription',
+    };
+  },
+  monthly_renewal: ({ dateText, lang = 'en' }) => {
+    const texts = getLocalizedTexts('monthly_renewal', lang, { dateText });
+    return {
+      category: CATEGORY.SUBSCRIPTION,
+      type: 'subscription',
+      trigger: 'monthly_renewal',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/subscription',
+    };
+  },
+  yearly_renewal: ({ dateText, lang = 'en' }) => {
+    const texts = getLocalizedTexts('yearly_renewal', lang, { dateText });
+    return {
+      category: CATEGORY.SUBSCRIPTION,
+      type: 'subscription',
+      trigger: 'yearly_renewal',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/subscription',
+    };
+  },
+  payment_failed: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('payment_failed', lang, {});
+    return {
+      category: CATEGORY.SUBSCRIPTION,
+      type: 'subscription',
+      trigger: 'payment_failed',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/payment',
+      critical: true,
+    };
+  },
+  upgrade_offer: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('upgrade_offer', lang, {});
+    return {
+      category: CATEGORY.SUBSCRIPTION,
+      type: 'subscription',
+      trigger: 'upgrade_offer',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/plans',
+    };
+  },
 
   // ---- Kategori 6: SİSTEM / HESAP ----
-  welcome: ({ username }) => ({
-    category: CATEGORY.SYSTEM,
-    type: 'welcome',
-    trigger: 'welcome',
-    title: 'Hoş Geldiniz! 👋',
-    subtitle: `Merhaba ${username || 'sana'}, MindCoach'a hoş geldiniz!`,
-    deepLink: 'home',
-  }),
-  new_device_login: () => ({
-    category: CATEGORY.SYSTEM,
-    type: 'security',
-    trigger: 'new_device_login',
-    title: 'Güvenlik',
-    subtitle: 'Hesabına yeni bir cihazdan giriş yapıldı',
-    deepLink: 'settings/security',
-    critical: true,
-  }),
-  verify: () => ({
-    category: CATEGORY.SYSTEM,
-    type: 'account',
-    trigger: 'verify',
-    title: 'Hesap doğrulama',
-    subtitle: 'Hesabını doğrulamak için son adım',
-    deepLink: 'verify',
-    critical: true,
-  }),
-  privacy_update: () => ({
-    category: CATEGORY.SYSTEM,
-    type: 'account',
-    trigger: 'privacy_update',
-    title: 'Gizlilik güncellemesi',
-    subtitle: 'Gizlilik politikamızda güncelleme yapıldı',
-    deepLink: 'settings/privacy',
-  }),
+  welcome: ({ username, lang = 'en' }) => {
+    const texts = getLocalizedTexts('welcome', lang, { username: username || '' });
+    return {
+      category: CATEGORY.SYSTEM,
+      type: 'welcome',
+      trigger: 'welcome',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'home',
+    };
+  },
+  new_device_login: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('new_device_login', lang, {});
+    return {
+      category: CATEGORY.SYSTEM,
+      type: 'security',
+      trigger: 'new_device_login',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/security',
+      critical: true,
+    };
+  },
+  verify: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('verify', lang, {});
+    return {
+      category: CATEGORY.SYSTEM,
+      type: 'account',
+      trigger: 'verify',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'verify',
+      critical: true,
+    };
+  },
+  privacy_update: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('privacy_update', lang, {});
+    return {
+      category: CATEGORY.SYSTEM,
+      type: 'account',
+      trigger: 'privacy_update',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'settings/privacy',
+    };
+  },
   // Kriz sonrası izin verilen TEK nötr/destekleyici kaynak bildirimi (Spec §1 Kriz duyarlılığı)
-  crisis_resource: () => ({
-    category: CATEGORY.SYSTEM,
-    type: 'support_resource',
-    trigger: 'crisis_resource',
-    title: 'Yanındayız',
-    subtitle: 'Zor anlarında yalnız değilsin. Destek kaynaklarına buradan ulaşabilirsin.',
-    deepLink: 'home',
-    critical: true,
-  }),
+  crisis_resource: ({ lang = 'en' } = {}) => {
+    const texts = getLocalizedTexts('crisis_resource', lang, {});
+    return {
+      category: CATEGORY.SYSTEM,
+      type: 'support_resource',
+      trigger: 'crisis_resource',
+      title: texts.title,
+      subtitle: texts.subtitle,
+      deepLink: 'home',
+      critical: true,
+    };
+  },
 };
 
 /**
