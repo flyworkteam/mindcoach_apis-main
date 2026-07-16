@@ -2464,7 +2464,8 @@ class VoiceChatServerV2 {
         const result = await AppointmentService.createAppointmentFromWebhook(
           ctx.userId,
           consultantId,
-          dt.toISOString()
+          dt.toISOString(),
+          { lang: ctx.language || ctx.user?.nativeLang }
         );
         // Tell the client so the UI can pop a toast / update the calendar view.
         this._sendJson(ctx.ws, {

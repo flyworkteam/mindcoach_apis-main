@@ -16,7 +16,7 @@ const { authenticate } = require('../middleware/auth');
  */
 router.post('/webhook', async (req, res) => {
   try {
-    const { userId, consultantId, appointmentDate } = req.body;
+    const { userId, consultantId, appointmentDate, lang } = req.body;
 
     // Validate required fields
     if (!userId || !consultantId || !appointmentDate) {
@@ -30,7 +30,8 @@ router.post('/webhook', async (req, res) => {
     const result = await AppointmentService.createAppointmentFromWebhook(
       userId,
       consultantId,
-      appointmentDate
+      appointmentDate,
+      { lang }
     );
 
     res.status(201).json({
@@ -167,7 +168,11 @@ router.delete('/:id', authenticate, async (req, res) => {
       });
     }
 
-    const result = await AppointmentService.cancelAppointment(appointmentId, userId);
+    const result = await AppointmentService.cancelAppointment(
+      appointmentId,
+      userId,
+      { lang: req.query.lang }
+    );
 
     res.status(200).json({
       success: true,
@@ -336,7 +341,11 @@ router.put('/:id/reactivate', authenticate, async (req, res) => {
       });
     }
 
-    const result = await AppointmentService.reactivateAppointment(appointmentId, userId);
+    const result = await AppointmentService.reactivateAppointment(
+      appointmentId,
+      userId,
+      { lang: req.query.lang }
+    );
 
     res.status(200).json({
       success: true,

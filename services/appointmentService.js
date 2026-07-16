@@ -39,9 +39,11 @@ class AppointmentService {
    * @param {number} userId - User ID (randevuyu alan kullanıcı)
    * @param {number} consultantId - Consultant ID (randevuyu veren kullanıcı)
    * @param {string} appointmentDate - Appointment date (ISO format)
+   * @param {Object} [options]
+   * @param {string} [options.lang] - UI dili (varsa nativeLang yerine kullanılır)
    * @returns {Promise<Object>} Response with appointment and notification message
    */
-  static async createAppointmentFromWebhook(userId, consultantId, appointmentDate) {
+  static async createAppointmentFromWebhook(userId, consultantId, appointmentDate, options = {}) {
     try {
       // Validate user exists
       const user = await UserService.getUserById(userId);
@@ -114,8 +116,8 @@ class AppointmentService {
         'pending'
       );
 
-      // Kullanıcının seçili diline göre bildirim metinlerini hazırla.
-      const lang = normalizeLang(user?.nativeLang);
+      // UI dili (client) veya kullanıcı nativeLang'ına göre bildirim metinlerini hazırla.
+      const lang = normalizeLang(options.lang || user?.nativeLang);
       const consultantName = pickConsultantName(consultant, lang);
       const { title: notificationTitle, subtitle: notificationSubtitle } =
         getLocalizedTexts('appointment_created', lang, { name: consultantName });
@@ -129,7 +131,8 @@ class AppointmentService {
           consultantId,
           notificationTitle,
           notificationSubtitle,
-          appointment.id
+          appointment.id,
+          consultantName
         ).catch(err => {
           console.error('⚠️ Failed to send appointment notification:', err.message);
         });
@@ -200,13 +203,18 @@ class AppointmentService {
    * @param {number} userId - User ID (must match appointment's userId)
    * @returns {Promise<Object>} Cancelled appointment
    */
-  static async cancelAppointment(appointmentId, userId) {
+  static async cancelAppointment(appointmentId, userId, options = {}) {
     try {
       // Cancel appointment (repository handles validation)
       const appointment = await AppointmentRepository.cancel(appointmentId, userId);
 
       // Send cancellation notification (async, don't wait)
-      sendCancellationNotification(userId, appointment.consultantId, appointment.id).catch(err => {
+      sendCancellationNotification(
+        userId,
+        appointment.consultantId,
+        appointment.id,
+        options.lang
+      ).catch(err => {
         console.error('⚠️ Failed to send cancellation notification:', err.message);
       });
 
@@ -303,13 +311,18 @@ class AppointmentService {
    * @param {number} userId - User ID (must match appointment's userId)
    * @returns {Promise<Object>} Reactivated appointment
    */
-  static async reactivateAppointment(appointmentId, userId) {
+  static async reactivateAppointment(appointmentId, userId, options = {}) {
     try {
       // Reactivate appointment (repository handles validation)
       const appointment = await AppointmentRepository.reactivate(appointmentId, userId);
 
       // Send reactivation notification (async, don't wait)
-      sendReactivationNotification(userId, appointment.consultantId, appointment.id).catch(err => {
+      sendReactivationNotification(
+        userId,
+        appointment.consultantId,
+        appointment.id,
+        options.lang
+      ).catch(err => {
         console.error('⚠️ Failed to send reactivation notification:', err.message);
       });
 
@@ -333,10 +346,15 @@ class AppointmentService {
  * @param {string} subtitle - Notification subtitle
  * @param {number} appointmentId - Appointment ID
  */
-async function sendAppointmentNotification(userId, consultantId, title, subtitle, appointmentId) {
+async function sendAppointmentNotification(userId, consultantId, title, subtitle, appointmentId, consultantName = null) {
   try {
     const consultant = await ConsultantService.getConsultantById(consultantId);
     const consultantPhotoUrl = consultant?.photoURL || null;
+    let resolvedName = consultantName;
+    if (!resolvedName) {
+      const lang = await getUserLang(userId);
+      resolvedName = pickConsultantName(consultant, lang);
+    }
 
     await NotificationEngine.dispatch(userId, {
       category: 'system',
@@ -350,6 +368,7 @@ async function sendAppointmentNotification(userId, consultantId, title, subtitle
         type: 'appointment',
         appointmentId,
         consultantId,
+        consultantName: resolvedName,
         consultantPhotoUrl,
         timestamp: new Date().toISOString(),
       },
@@ -368,9 +387,11 @@ async function sendAppointmentNotification(userId, consultantId, title, subtitle
  * @param {number} consultantId - Consultant ID
  * @param {number} appointmentId - Appointment ID
  */
-async function sendCancellationNotification(userId, consultantId, appointmentId) {
+async function sendCancellationNotification(userId, consultantId, appointmentId, preferredLang) {
   try {
-    const lang = await getUserLang(userId);
+    const lang = preferredLang
+      ? normalizeLang(preferredLang)
+      : await getUserLang(userId);
     const { title, subtitle } = getLocalizedTexts('appointment_cancelled', lang);
     await NotificationEngine.dispatch(userId, {
       category: 'system',
@@ -401,9 +422,11 @@ async function sendCancellationNotification(userId, consultantId, appointmentId)
  * @param {number} consultantId - Consultant ID
  * @param {number} appointmentId - Appointment ID
  */
-async function sendReactivationNotification(userId, consultantId, appointmentId) {
+async function sendReactivationNotification(userId, consultantId, appointmentId, preferredLang) {
   try {
-    const lang = await getUserLang(userId);
+    const lang = preferredLang
+      ? normalizeLang(preferredLang)
+      : await getUserLang(userId);
     const { title, subtitle } = getLocalizedTexts('appointment_reactivated', lang);
     await NotificationEngine.dispatch(userId, {
       category: 'system',

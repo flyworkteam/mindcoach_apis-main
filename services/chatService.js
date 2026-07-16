@@ -111,7 +111,13 @@ class ChatService {
       await ChatRepository.updateLastMessage(chatId, aiReply, sentTime);
       console.log(`[CHAT-AI] Text reply saved (${aiReply.length} chars)`);
 
-      await this._handleToolCalls(toolCalls, user.id || user.userId, consultantId, chatId);
+      await this._handleToolCalls(
+        toolCalls,
+        user.id || user.userId,
+        consultantId,
+        chatId,
+        nativeLang
+      );
 
       // Realtime: terapistten yeni mesaj bildirimi
       this._notifyTherapistMessage(user.id || user.userId, consultant, aiReply)
@@ -165,7 +171,7 @@ class ChatService {
           console.error('[PREMIUM-AI] TTS failed, falling back to text:', ttsErr.message);
           await this.createConsultantTextMessage(chatId, consultantId, aiReply, sentTime);
           await ChatRepository.updateLastMessage(chatId, aiReply, sentTime);
-          await this._handleToolCalls(toolCalls, userId, consultantId, chatId);
+          await this._handleToolCalls(toolCalls, userId, consultantId, chatId, nativeLang);
           return;
         }
 
@@ -178,7 +184,7 @@ class ChatService {
           console.error('[PREMIUM-AI] CDN upload failed, falling back to text:', uploadErr.message);
           await this.createConsultantTextMessage(chatId, consultantId, aiReply, sentTime);
           await ChatRepository.updateLastMessage(chatId, aiReply, sentTime);
-          await this._handleToolCalls(toolCalls, userId, consultantId, chatId);
+          await this._handleToolCalls(toolCalls, userId, consultantId, chatId, nativeLang);
           return;
         }
 
@@ -197,7 +203,7 @@ class ChatService {
         console.log(`[PREMIUM-AI] Text reply saved (${aiReply.length} chars)`);
       }
 
-      await this._handleToolCalls(toolCalls, userId, consultantId, chatId);
+      await this._handleToolCalls(toolCalls, userId, consultantId, chatId, nativeLang);
 
       // Realtime: terapistten yeni mesaj bildirimi
       this._notifyTherapistMessage(userId, consultant, aiReply).catch(() => {});
@@ -493,8 +499,10 @@ class ChatService {
   /**
    * Process any tool calls returned by the AI (e.g. appointment creation).
    */
-  static async _handleToolCalls(toolCalls, userId, consultantId, chatId) {
+  static async _handleToolCalls(toolCalls, userId, consultantId, chatId, lang = 'en') {
     if (!toolCalls || toolCalls.length === 0) return;
+
+    const normalizedLang = (lang || 'en').toString().toLowerCase().split('-')[0];
 
     for (const tc of toolCalls) {
       if (tc.name === 'create_appointment') {
@@ -506,7 +514,8 @@ class ChatService {
           const result = await AppointmentService.createAppointmentFromWebhook(
             userId,
             consultantId,
-            normalizedDate
+            normalizedDate,
+            { lang: normalizedLang }
           );
 
           console.log(`[APPOINTMENT-AI] Appointment created: id=${result.appointment?.id}`);
